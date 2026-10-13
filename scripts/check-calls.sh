@@ -20,11 +20,11 @@ forbidden="$(jq -r '
     | select(. != "nothing on $")
     | split(", ")[]
     | select(split(".")[1] as $noun
-        | ["fs", "process", "clock", "ui", "tool", "state", "env"] | index($noun) | not)
+        | ["fs", "process", "clock", "ui", "tool", "state", "env", "session"] | index($noun) | not)
 ' <<< "$report")"
 
 if [ -n "$forbidden" ]; then
-    echo "forbidden \$ calls (allowed: fs, process, clock, ui, tool, state, env):"
+    echo "forbidden \$ calls (allowed: fs, process, clock, ui, tool, state, env, session):"
     echo "$forbidden"
     exit 1
 fi
