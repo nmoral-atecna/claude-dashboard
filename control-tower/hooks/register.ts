@@ -43,7 +43,9 @@ export const register: Register = (on, options) => {
       env: { get: () => $.env.get('HOME') },
       clock: { now: () => $.clock.now() },
       // $.state.set needs a literal plugin and key; the store only writes control-tower.issues.
-      state: { set: (ref: any, value: any) => $.state.set({ plugin: 'control-tower', key: 'issues', id: ref.id }, value) },
+      state: {
+        set: (ref: any, value: any) => $.state.set({ plugin: 'control-tower', key: 'issues', id: ref.id }, value),
+      },
     }
     const tracked = await resolveIssue(io, await $.session.cwd(), String(options.branchPattern))
     if (tracked === null) return { result: NO_ISSUE }
@@ -51,7 +53,9 @@ export const register: Register = (on, options) => {
     const at = new Date(await $.clock.now()).toISOString()
     const outcome = applyStep(current, e, tracked, at)
     if ('refusal' in outcome) return { result: outcome.refusal }
-    if (!(await saveIssue(io, outcome.record))) return { result: `Failed to save issue ${tracked.issue}; see the transcript.` }
+    if (!(await saveIssue(io, outcome.record))) {
+      return { result: `Failed to save issue ${tracked.issue}; see the transcript.` }
+    }
     return { result: `Issue ${tracked.issue} moved to \`${outcome.record.step}\`.` }
   })
 }

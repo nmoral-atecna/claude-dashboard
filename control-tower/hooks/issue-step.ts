@@ -19,7 +19,8 @@ export function applyStep(
   if (STEPS.indexOf(request.step) > next) {
     return { refusal: `Missing intermediate step: \`${STEPS[next]}\`. Move to \`${STEPS[next]}\` first.` }
   }
-  const base = current ?? { ...tracked, title: null, step: request.step, blockedReason: null, history: [], updatedAt: '' }
+  const base = current
+    ?? { ...tracked, title: null, step: request.step, blockedReason: null, history: [], updatedAt: '' }
   return {
     record: {
       ...base,
