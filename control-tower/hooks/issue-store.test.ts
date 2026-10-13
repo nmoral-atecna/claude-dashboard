@@ -192,6 +192,18 @@ test('T4f save-logs-when-home-unset', async () => {
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
+test('T4g save-logs-when-home-empty', async () => {
+  const { $, calls } = fake({ home: '' })
+  await saveIssue($, record())
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: save failed claude-dashboard/2: HOME is not set')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(runs(calls, 'mv')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
 test('T5 parallel-saves-use-distinct-files', async () => {
   const { $, calls } = fake({ yieldOnWrite: true })
   await Promise.all([saveIssue($, record(2, '/src/feat-2')), saveIssue($, record(3, '/src/feat-3'))])
@@ -268,6 +280,18 @@ test('T7d load-logs-when-git-fails', async () => {
 
 test('T7e load-logs-when-home-unset', async () => {
   const { $, calls } = fake({ home: undefined })
+  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: read failed claude-dashboard/2: HOME is not set')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'exists')).toHaveLength(0)
+  expect(of(calls, 'read')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T7f load-logs-when-home-empty', async () => {
+  const { $, calls } = fake({ home: '' })
   expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
   const logs = of(calls, 'log')
   expect(logs).toHaveLength(1)
