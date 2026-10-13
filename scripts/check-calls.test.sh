@@ -13,6 +13,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Sets $mod; not called via $(...) so tmp_dirs reaches the cleanup trap.
 make_mod() {
     local dir
     dir="$(mktemp -d)"
@@ -26,7 +27,7 @@ export const register: Register = (on) => {
   on('session.start', async (\$, e, next) => { $1; return next(e) })
 }
 TS
-    echo "$dir"
+    mod="$dir"
 }
 
 fail() {
@@ -38,12 +39,14 @@ if ! "$check" "$root/control-tower" > /dev/null 2>&1; then
     fail T2a "control-tower should pass"
 fi
 
-mod_b="$(make_mod "\$.ui.toast('a'); await \$.fs.read('/tmp/x')")"
+make_mod "\$.ui.toast('a'); await \$.fs.read('/tmp/x')"
+mod_b="$mod"
 if ! "$check" "$mod_b" > /dev/null 2>&1; then
     fail T2b "\$.ui.toast + \$.fs.read should pass"
 fi
 
-mod_c="$(make_mod "\$.ui.toast('a'); await \$.http.fetch({ url: 'https://x' } as any)")"
+make_mod "\$.ui.toast('a'); await \$.http.fetch({ url: 'https://x' } as any)"
+mod_c="$mod"
 if out_c="$("$check" "$mod_c" 2>&1)"; then
     fail T2c "\$.http.fetch should fail"
 fi
@@ -73,7 +76,8 @@ missing="$(mktemp -d)"
 rmdir "$missing"
 expect_validate_failure T7a "$missing"
 
-mod_7b="$(make_mod "const x = \$")"
+make_mod "const x = \$"
+mod_7b="$mod"
 expect_validate_failure T7b "$mod_7b"
 
 [ "$failed" -eq 0 ] && echo "T2/T7 check-calls: OK"
