@@ -236,6 +236,28 @@ test('T6 every-process-run-has-short-timeout', async () => {
   }
 })
 
+test('T8a save-returns-true-on-success', async () => {
+  const { $ } = fake()
+  expect(await saveIssue($, record())).toBe(true)
+})
+
+test('T8b save-returns-false-and-logs-on-failure', async () => {
+  const failures = [
+    { git: gitFails },
+    { writeError: new Error('EACCES: permission denied') },
+    { mv: mvFails },
+    { gitError: new Error('timed out') },
+    { envError: new Error('env unavailable') },
+    { home: undefined },
+    { home: '' },
+  ]
+  for (const options of failures) {
+    const { $, calls } = fake(options)
+    expect(await saveIssue($, record())).toBe(false)
+    expect(of(calls, 'log')).toHaveLength(1)
+  }
+})
+
 test('T7a load-returns-record', async () => {
   const { $, calls } = fake({ files: { [`${DIR}/2.json`]: JSON.stringify(record()) } })
   expect(await loadIssue($, '/src/feat-2', 2)).toEqual(record())
