@@ -4,27 +4,50 @@ import type { IssueRecord } from 'claude-code'
 export async function saveIssue($: any, record: IssueRecord): Promise<void> {
   let label = `${record.worktree}/${record.issue}`
   try {
-    const git = await run($, ['git', 'worktree', 'list', '--porcelain'], { cwd: record.worktree })
-    if (git.exitCode !== 0) return logFailure($, label, git.stderr)
-
-    const mainWorktree = git.stdout.split('\n')[0].slice('worktree '.length)
-    const project = mainWorktree.slice(mainWorktree.lastIndexOf('/') + 1)
+    const project = await projectOf($, record.worktree)
     label = `${project}/${record.issue}`
-    const path = `${await $.env.get('HOME')}/.claude/control-tower/${project}/${record.issue}.json`
+    const path = await issuePath($, project, record.issue)
     const tmp = `${path}.tmp-${crypto.randomUUID()}`
     const saved = { ...record, updatedAt: new Date(await $.clock.now()).toISOString() }
 
     await $.fs.write(tmp, JSON.stringify(saved, null, 2))
     const mv = await run($, ['mv', tmp, path])
     if (mv.exitCode !== 0) {
-      logFailure($, label, mv.stderr)
+      logFailure($, 'save', label, mv.stderr)
       await run($, ['rm', '-f', tmp])
       return
     }
     await $.state.set({ plugin: 'control-tower', key: 'issues', id: String(record.issue) }, saved)
   } catch (error: any) {
-    logFailure($, label, error.message)
+    logFailure($, 'save', label, error.message)
   }
+}
+
+/** Reads the record from its JSON file; null when missing or unreadable. Never rejects. */
+export async function loadIssue($: any, worktree: string, issue: number): Promise<IssueRecord | null> {
+  let label = `${worktree}/${issue}`
+  try {
+    const project = await projectOf($, worktree)
+    label = `${project}/${issue}`
+    const path = await issuePath($, project, issue)
+    if (!(await $.fs.exists(path))) return null
+    return JSON.parse(await $.fs.read(path))
+  } catch (error: any) {
+    logFailure($, 'read', label, error.message)
+    return null
+  }
+}
+
+/** Basename of the main worktree, i.e. the first `worktree` line of `git worktree list --porcelain`. */
+async function projectOf($: any, worktree: string): Promise<string> {
+  const git = await run($, ['git', 'worktree', 'list', '--porcelain'], { cwd: worktree })
+  if (git.exitCode !== 0) throw new Error(git.stderr)
+  const mainWorktree = git.stdout.split('\n')[0].slice('worktree '.length)
+  return mainWorktree.slice(mainWorktree.lastIndexOf('/') + 1)
+}
+
+async function issuePath($: any, project: string, issue: number): Promise<string> {
+  return `${await $.env.get('HOME')}/.claude/control-tower/${project}/${issue}.json`
 }
 
 // A rejected mv must still trigger the temp cleanup, so process.run rejections become failed exits.
@@ -36,6 +59,6 @@ async function run($: any, argv: string[], init: { cwd?: string } = {}): Promise
   }
 }
 
-function logFailure($: any, label: string, message: string): void {
-  $.ui.log(`control-tower: save failed ${label}: ${message.trimEnd()}`, { to: 'transcript' })
+function logFailure($: any, action: 'save' | 'read', label: string, message: string): void {
+  $.ui.log(`control-tower: ${action} failed ${label}: ${message.trimEnd()}`, { to: 'transcript' })
 }
