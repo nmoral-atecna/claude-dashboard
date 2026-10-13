@@ -2,5 +2,8 @@
   "name": "control-tower",
   "version": "0.1.0",
   "description": "Control tower dashboard mod for Claude Code",
-  "author": { "name": "nmoral-atecna" }
+  "author": {
+    "name": "nmoral-atecna"
+  },
+  "types": "./types/index.d.ts"
 }
