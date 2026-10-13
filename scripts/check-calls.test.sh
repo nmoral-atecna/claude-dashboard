@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # T2: scripts/check-calls.sh accepts allowed $ calls and names forbidden ones.
+# T7: it reports a failing validate on stderr only.
 set -u
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,5 +54,27 @@ if grep -qF '$.ui.toast' <<< "$out_c"; then
     fail T2c "output should not name \$.ui.toast"
 fi
 
-[ "$failed" -eq 0 ] && echo "T2 check-calls: OK"
+expect_validate_failure() {
+    local id="$1" dir="$2" out err
+    err="$(mktemp)"
+    tmp_dirs+=("$err")
+    if out="$("$check" "$dir" 2> "$err")"; then
+        fail "$id" "should fail"
+    fi
+    if ! grep -F 'validate failed' "$err" | grep -qF "$dir"; then
+        fail "$id" "stderr should contain 'validate failed' and $dir"
+    fi
+    if [ -n "$out" ]; then
+        fail "$id" "stdout should be empty"
+    fi
+}
+
+missing="$(mktemp -d)"
+rmdir "$missing"
+expect_validate_failure T7a "$missing"
+
+mod_7b="$(make_mod "const x = \$")"
+expect_validate_failure T7b "$mod_7b"
+
+[ "$failed" -eq 0 ] && echo "T2/T7 check-calls: OK"
 exit "$failed"
