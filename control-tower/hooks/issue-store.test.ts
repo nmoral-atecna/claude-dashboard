@@ -26,12 +26,16 @@ function fake(options: any = {}): { $: any; calls: any[] } {
     env: {
       get: async (name: string) => {
         if (options.envError) throw options.envError
-        return name === 'HOME' ? '/home/t' : undefined
+        if (name !== 'HOME') return undefined
+        return 'home' in options ? options.home : '/home/t'
       },
     },
     clock: { now: async () => NOW },
     fs: {
-      exists: async (path: string) => path in (options.files ?? {}),
+      exists: async (path: string) => {
+        calls.push({ kind: 'exists', path })
+        return path in (options.files ?? {})
+      },
       read: async (path: string) => {
         calls.push({ kind: 'read', path })
         if (!(path in (options.files ?? {}))) {
@@ -176,6 +180,18 @@ test('T4e save-logs-when-env-get-rejects', async () => {
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
+test('T4f save-logs-when-home-unset', async () => {
+  const { $, calls } = fake({ home: undefined })
+  await saveIssue($, record())
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: save failed claude-dashboard/2: HOME is not set')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(runs(calls, 'mv')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
 test('T5 parallel-saves-use-distinct-files', async () => {
   const { $, calls } = fake({ yieldOnWrite: true })
   await Promise.all([saveIssue($, record(2, '/src/feat-2')), saveIssue($, record(3, '/src/feat-3'))])
@@ -246,6 +262,18 @@ test('T7d load-logs-when-git-fails', async () => {
   expect(logs).toHaveLength(1)
   expect(logs[0].text).toBe('control-tower: read failed /src/feat-2/2: fatal: not a git repository')
   expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'read')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T7e load-logs-when-home-unset', async () => {
+  const { $, calls } = fake({ home: undefined })
+  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: read failed claude-dashboard/2: HOME is not set')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'exists')).toHaveLength(0)
   expect(of(calls, 'read')).toHaveLength(0)
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
