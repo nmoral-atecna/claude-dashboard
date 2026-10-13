@@ -5,5 +5,13 @@
   "author": {
     "name": "nmoral-atecna"
   },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "branchPattern": {
+      "type": "string",
+      "title": "Branch pattern",
+      "description": "Regex matched against the branch name; capture group 1 is the issue number",
+      "default": "^(?:feat|fix|chore)/(\\d+)-"
+    }
+  }
 }
