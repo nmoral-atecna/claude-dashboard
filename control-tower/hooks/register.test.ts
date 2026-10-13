@@ -221,3 +221,36 @@ test('C7.1 failed-save-answers-failure', async ($: any, on: any) => {
   expect(await call($, { step: 'tests-ecrits' })).toBe('Failed to save issue 142; see the transcript.')
   expect(files[FILE]).toBe(before)
 })
+
+const INVALID_DONE = 'Invalid step `done`. Expected one of: `spec`, `tests-ecrits`, `tests-valides`, `vert`, '
+  + '`refacto`, `doc`, `mr`, `ci`, `termine`, `bloque`.'
+
+test('C6.1 step-outside-enum-is-refused', async ($: any, on: any) => {
+  const files = disk('spec')
+  const before = files[FILE]
+  const calls = engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'done' })).toBe(INVALID_DONE)
+  expect(files).toEqual({ [FILE]: before })
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C6.1 step-outside-enum-is-refused-before-branch-check', async ($: any, on: any) => {
+  const calls = engine(on, 'main')
+  expect(await call($, { step: 'done' })).toBe(INVALID_DONE)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C6.2 note-over-200-characters-is-refused', async ($: any, on: any) => {
+  const files = disk('spec')
+  const before = files[FILE]
+  const calls = engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'tests-ecrits', note: 'x'.repeat(201) })).toBe('`note` must be at most 200 characters.')
+  expect(files).toEqual({ [FILE]: before })
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C6.2 note-of-200-characters-is-accepted', async ($: any, on: any) => {
+  const files = disk('spec')
+  engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'tests-ecrits', note: 'x'.repeat(200) })).toBe('Issue 142 moved to `tests-ecrits`.')
+})
