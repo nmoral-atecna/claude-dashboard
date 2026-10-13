@@ -47,7 +47,9 @@ async function projectOf($: any, worktree: string): Promise<string> {
 }
 
 async function issuePath($: any, project: string, issue: number): Promise<string> {
-  return `${await $.env.get('HOME')}/.claude/control-tower/${project}/${issue}.json`
+  const home = await $.env.get('HOME')
+  if (!home) throw new Error('HOME is not set')
+  return `${home}/.claude/control-tower/${project}/${issue}.json`
 }
 
 // A rejected mv must still trigger the temp cleanup, so process.run rejections become failed exits.
