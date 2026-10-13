@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { saveIssue } from './issue-store'
+import { loadIssue, saveIssue } from './issue-store'
 
 const NOW = 1791892800000
 const NOW_ISO = '2026-10-13T12:00:00.000Z'
@@ -31,6 +31,14 @@ function fake(options: any = {}): { $: any; calls: any[] } {
     },
     clock: { now: async () => NOW },
     fs: {
+      exists: async (path: string) => path in (options.files ?? {}),
+      read: async (path: string) => {
+        calls.push({ kind: 'read', path })
+        if (!(path in (options.files ?? {}))) {
+          throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' })
+        }
+        return options.files[path]
+      },
       write: async (path: string, text: string) => {
         calls.push({ kind: 'write', path, text })
         if (options.yieldOnWrite) await Promise.resolve()
@@ -183,13 +191,61 @@ test('T5 parallel-saves-use-distinct-files', async () => {
 })
 
 test('T6 every-process-run-has-short-timeout', async () => {
-  for (const [options, expected] of [[{}, ['git', 'mv']], [{ mv: mvFails }, ['git', 'mv', 'rm']]] as const) {
+  const scenarios = [
+    [{}, ['git', 'mv'], saveIssue],
+    [{ mv: mvFails }, ['git', 'mv', 'rm'], saveIssue],
+    [{}, ['git'], loadIssue],
+  ] as const
+  for (const [options, expected, action] of scenarios) {
     const { $, calls } = fake(options)
-    await saveIssue($, record())
+    if (action === loadIssue) await loadIssue($, '/src/feat-2', 2)
+    else await saveIssue($, record())
     expect(of(calls, 'run').map((c) => c.argv[0])).toEqual(expected)
     for (const run of of(calls, 'run')) {
       expect(run.init.timeoutMs).toBeDefined()
       expect(run.init.timeoutMs).toBeLessThanOrEqual(1000)
     }
   }
+})
+
+test('T7a load-returns-record', async () => {
+  const { $, calls } = fake({ files: { [`${DIR}/2.json`]: JSON.stringify(record()) } })
+  expect(await loadIssue($, '/src/feat-2', 2)).toEqual(record())
+  expect(of(calls, 'log')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T7b load-returns-null-when-missing', async () => {
+  const { $, calls } = fake()
+  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  expect(of(calls, 'log')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T7c load-logs-when-json-invalid', async () => {
+  const { $, calls } = fake({ files: { [`${DIR}/2.json`]: '{not json' } })
+  let parseMessage = ''
+  try {
+    JSON.parse('{not json')
+  } catch (error: any) {
+    parseMessage = error.message
+  }
+  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text.startsWith('control-tower: read failed claude-dashboard/2: ')).toBe(true)
+  expect(logs[0].text).toContain(parseMessage)
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T7d load-logs-when-git-fails', async () => {
+  const { $, calls } = fake({ git: gitFails })
+  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: read failed /src/feat-2/2: fatal: not a git repository')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'read')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
 })
