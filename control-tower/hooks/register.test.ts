@@ -254,3 +254,61 @@ test('C6.2 note-of-200-characters-is-accepted', async ($: any, on: any) => {
   engine(on, 'feat/142-tva', files)
   expect(await call($, { step: 'tests-ecrits', note: 'x'.repeat(200) })).toBe('Issue 142 moved to `tests-ecrits`.')
 })
+
+test('C5.1 bloque-sets-blocked-reason-and-keeps-step', async ($: any, on: any) => {
+  const files = disk('vert', { history: [entry('vert')] })
+  engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'bloque', blockedReason: 'waiting API', note: 'ignored' }))
+    .toBe('Issue 142 blocked: waiting API.')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('vert')
+  expect(saved.blockedReason).toBe('waiting API')
+  expect(saved.history).toEqual([entry('vert'), entry('vert', 'waiting API')])
+})
+
+test('C5.2 real-step-unblocks', async ($: any, on: any) => {
+  const files = disk('vert', { blockedReason: 'waiting API' })
+  engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'refacto' })).toBe('Issue 142 moved to `refacto`.')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.blockedReason).toBeNull()
+  expect(saved.step).toBe('refacto')
+  expect(saved.history).toEqual([entry('refacto', 'unblocked')])
+})
+
+test('C5.2 real-step-unblocks-with-note', async ($: any, on: any) => {
+  const files = disk('vert', { blockedReason: 'waiting API' })
+  engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'refacto', note: 'API ready' })).toBe('Issue 142 moved to `refacto`.')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.blockedReason).toBeNull()
+  expect(saved.history).toEqual([entry('refacto', 'unblocked; API ready')])
+})
+
+test('C5.3 bloque-without-file-is-refused', async ($: any, on: any) => {
+  const files: Record<string, string> = {}
+  const calls = engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'bloque', blockedReason: 'x' }))
+    .toBe('Missing intermediate step: `spec`. Move to `spec` first.')
+  expect(files).toEqual({})
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.4 blocked-reason-is-ignored-outside-bloque', async ($: any, on: any) => {
+  const files = disk('vert')
+  engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'refacto', blockedReason: 'x' })).toBe('Issue 142 moved to `refacto`.')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.blockedReason).toBeNull()
+  expect(saved.step).toBe('refacto')
+  expect(saved.history).toEqual([entry('refacto')])
+})
+
+test('C6.3 bloque-without-blocked-reason-is-refused', async ($: any, on: any) => {
+  const files = disk('spec')
+  const before = files[FILE]
+  const calls = engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'bloque' })).toBe('`blockedReason` is required when step is `bloque`.')
+  expect(files).toEqual({ [FILE]: before })
+  expect(of(calls, 'write')).toHaveLength(0)
+})
