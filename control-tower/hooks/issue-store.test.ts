@@ -23,7 +23,12 @@ function fake(options: any = {}): { $: any; calls: any[] } {
   const calls: any[] = []
   const ok = { exitCode: 0, stdout: '', stderr: '' }
   const $: any = {
-    env: { get: async (name: string) => (name === 'HOME' ? '/home/t' : undefined) },
+    env: {
+      get: async (name: string) => {
+        if (options.envError) throw options.envError
+        return name === 'HOME' ? '/home/t' : undefined
+      },
+    },
     clock: { now: async () => NOW },
     fs: {
       write: async (path: string, text: string) => {
@@ -36,6 +41,7 @@ function fake(options: any = {}): { $: any; calls: any[] } {
       run: async (argv: string[], init: any) => {
         calls.push({ kind: 'run', argv, init })
         if (argv[0] === 'git') {
+          if (options.gitError) throw options.gitError
           return options.git ?? {
             ...ok,
             stdout: 'worktree /src/claude-dashboard\nHEAD abc\nbranch refs/heads/main\n\n'
@@ -137,6 +143,28 @@ test('T4c save-logs-and-removes-temp-when-mv-fails', async () => {
   const rm = runs(calls, 'rm')
   expect(rm).toHaveLength(1)
   expect(rm[0].argv).toEqual(['rm', '-f', of(calls, 'write')[0].path])
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T4d save-logs-when-process-run-rejects', async () => {
+  const { $, calls } = fake({ gitError: new Error('timed out') })
+  await saveIssue($, record())
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: save failed /src/feat-2/2: timed out')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('T4e save-logs-when-env-get-rejects', async () => {
+  const { $, calls } = fake({ envError: new Error('env unavailable') })
+  await saveIssue($, record())
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].text).toBe('control-tower: save failed claude-dashboard/2: env unavailable')
+  expect(logs[0].opts).toEqual({ to: 'transcript' })
+  expect(of(calls, 'write')).toHaveLength(0)
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
