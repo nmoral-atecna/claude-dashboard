@@ -7,7 +7,12 @@ if [ "$#" -ne 1 ]; then
     exit 2
 fi
 
-forbidden="$(claude plugin validate --json "$1" | jq -r '
+if ! report="$(claude plugin validate --json "$1")"; then
+    echo "validate failed: $1" >&2
+    exit 1
+fi
+
+forbidden="$(jq -r '
     .contents[].notes[]?
     | select(test(" calls: "))
     | sub("^.* calls: "; "")
@@ -15,7 +20,7 @@ forbidden="$(claude plugin validate --json "$1" | jq -r '
     | split(", ")[]
     | select(split(".")[1] as $noun
         | ["fs", "process", "clock", "ui", "tool", "state"] | index($noun) | not)
-')"
+' <<< "$report")"
 
 if [ -n "$forbidden" ]; then
     echo "forbidden \$ calls (allowed: fs, process, clock, ui, tool, state):"
