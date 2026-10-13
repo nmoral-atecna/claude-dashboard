@@ -1,6 +1,19 @@
 import type { IssueRecord, Step } from 'claude-code'
 
 export const STEPS: Step[] = ['spec', 'tests-ecrits', 'tests-valides', 'vert', 'refacto', 'doc', 'mr', 'ci', 'termine']
+export const REQUESTED_STEPS = [...STEPS, 'bloque']
+export const NOTE_MAX_LENGTH = 200
+
+/** The refusal for an input the schema forbids, or null when it is valid. */
+export function invalidRequest(input: { step?: unknown; note?: unknown }): string | null {
+  if (!REQUESTED_STEPS.includes(input.step as string)) {
+    return `Invalid step \`${input.step}\`. Expected one of: ${REQUESTED_STEPS.map((s) => `\`${s}\``).join(', ')}.`
+  }
+  if (typeof input.note === 'string' && input.note.length > NOTE_MAX_LENGTH) {
+    return `\`note\` must be at most ${NOTE_MAX_LENGTH} characters.`
+  }
+  return null
+}
 
 type StepRequest = { step: Step; note?: string; title?: string }
 type TrackedIssue = { issue: number; branch: string; worktree: string }

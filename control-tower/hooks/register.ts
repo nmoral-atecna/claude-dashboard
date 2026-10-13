@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { resolveIssue } from './issue-resolver'
 import { loadIssue, saveIssue } from './issue-store'
-import { applyStep, STEPS } from './issue-step'
+import { applyStep, invalidRequest, NOTE_MAX_LENGTH, REQUESTED_STEPS, STEPS } from './issue-step'
 const NO_ISSUE = 'No issue tracked on this branch. Do not retry; ask the user to switch to an issue branch.'
 
 const SET_ISSUE_STEP = {
@@ -13,8 +13,8 @@ const SET_ISSUE_STEP = {
   inputSchema: {
     type: 'object',
     properties: {
-      step: { type: 'string', enum: [...STEPS, 'bloque'], description: 'Target step, or `bloque` to block the issue.' },
-      note: { type: 'string', maxLength: 200, description: 'Short note recorded in the issue history.' },
+      step: { type: 'string', enum: REQUESTED_STEPS, description: 'Target step, or `bloque` to block the issue.' },
+      note: { type: 'string', maxLength: NOTE_MAX_LENGTH, description: 'Short note recorded in the issue history.' },
       title: { type: 'string', description: 'Issue title, kept only when the issue has none.' },
       blockedReason: { type: 'string', description: 'Why the issue is blocked; required when step is `bloque`.' },
     },
@@ -30,6 +30,8 @@ export const register: Register = (on, options) => {
 
   // Answered here without next(e): the call never reaches core, hence no permission check.
   on('tool.call', { tool: 'mcp__control-tower__set_issue_step' }, async ($, e: any) => {
+    const invalid = invalidRequest(e)
+    if (invalid !== null) return { result: invalid }
     // $ cannot cross an import, so the helpers get closures limited to the calls they make.
     const io = {
       process: { run: (argv: string[], init: any) => $.process.run(argv, init) },
