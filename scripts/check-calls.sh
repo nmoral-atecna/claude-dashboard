@@ -9,6 +9,7 @@ fi
 
 if ! report="$(claude plugin validate --json "$1")"; then
     echo "validate failed: $1" >&2
+    jq -r '.manifest.errors[].message, .contents[].errors[].message' <<< "$report" >&2
     exit 1
 fi
 
