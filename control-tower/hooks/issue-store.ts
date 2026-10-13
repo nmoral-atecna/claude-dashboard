@@ -1,7 +1,7 @@
 import type { IssueRecord } from 'claude-code'
 
-/** Writes the record atomically to its JSON file, then mirrors it in $.state. Never rejects. */
-export async function saveIssue($: any, record: IssueRecord): Promise<void> {
+/** Writes the record atomically to its JSON file, then mirrors it in $.state. Never rejects; false on failure. */
+export async function saveIssue($: any, record: IssueRecord): Promise<boolean> {
   let label = `${record.worktree}/${record.issue}`
   try {
     const project = await projectOf($, record.worktree)
@@ -15,11 +15,13 @@ export async function saveIssue($: any, record: IssueRecord): Promise<void> {
     if (mv.exitCode !== 0) {
       logFailure($, 'save', label, mv.stderr)
       await run($, ['rm', '-f', tmp])
-      return
+      return false
     }
     await $.state.set({ plugin: 'control-tower', key: 'issues', id: String(record.issue) }, saved)
+    return true
   } catch (error: any) {
     logFailure($, 'save', label, error.message)
+    return false
   }
 }
 

@@ -105,10 +105,10 @@ the complete record.
    `<issue>.json` with `mv` (`$.fs` has no rename nor delete). Saves of
    different issues never share a temporary file.
 3. Only after a successful `mv`, mirrors the full record in `$.state` under
-   `{ plugin: "control-tower", key: "issues", id: "<issue>" }`.
+   `{ plugin: "control-tower", key: "issues", id: "<issue>" }`, and returns `true`.
 
 It never rejects. On any failure (git, `HOME` unset, write, `mv`, or any
-rejected `$` call) it logs one line to the transcript and returns, leaving
+rejected `$` call) it logs one line to the transcript and returns `false`, leaving
 `$.state` untouched; a failed `mv` also removes the temporary file (`rm -f`):
 
 ```
