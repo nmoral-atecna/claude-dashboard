@@ -22,7 +22,7 @@ claude plugin test control-tower
 ```
 
 `scripts/check-calls.sh` fails when the mod calls `$` outside
-`fs`, `process`, `clock`, `ui`, `tool` and `state`.
+`fs`, `process`, `clock`, `ui`, `tool`, `state`, `env` and `session`.
 
 ### `scripts/check-calls.sh <mod-dir>`
 
@@ -140,8 +140,8 @@ The content is only `JSON.parse`d; its shape is not checked.
   `claude plugin validate --strict control-tower` notes
   `declares state: control-tower.issues`.
 - `validate` only reports the `$` calls of hooks registered in `register.ts`,
-  so the store's calls (including `$.env`, not in the `check-calls.sh` allowed
-  list) are not seen by `scripts/check-calls.sh` while it is not wired.
+  so the store's calls are not seen by `scripts/check-calls.sh` while it is not
+  wired.
 
 ## Branch resolution
 
