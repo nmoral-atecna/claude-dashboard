@@ -58,6 +58,7 @@ export const register: Register = (on, options) => {
     if (!(await saveIssue(io, outcome.record))) {
       return { result: `Failed to save issue ${tracked.issue}; see the transcript.` }
     }
+    if (e.step === 'bloque') return { result: `Issue ${tracked.issue} blocked: ${outcome.record.blockedReason}.` }
     return { result: `Issue ${tracked.issue} moved to \`${outcome.record.step}\`.` }
   })
 }
