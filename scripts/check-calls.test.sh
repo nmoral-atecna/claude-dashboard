@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # T2: scripts/check-calls.sh accepts allowed $ calls and names forbidden ones.
 # T7: it reports a failing validate on stderr only.
+# T9: that stderr report includes validate's error messages.
 set -u
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -58,7 +59,7 @@ if grep -qF '$.ui.toast' <<< "$out_c"; then
 fi
 
 expect_validate_failure() {
-    local id="$1" dir="$2" out err
+    local id="$1" dir="$2" message="$3" out err
     err="$(mktemp)"
     tmp_dirs+=("$err")
     if out="$("$check" "$dir" 2> "$err")"; then
@@ -67,6 +68,9 @@ expect_validate_failure() {
     if ! grep -F 'validate failed' "$err" | grep -qF "$dir"; then
         fail "$id" "stderr should contain 'validate failed' and $dir"
     fi
+    if ! grep -qF "$message" "$err"; then
+        fail "$id" "stderr should contain '$message'"
+    fi
     if [ -n "$out" ]; then
         fail "$id" "stdout should be empty"
     fi
@@ -74,11 +78,11 @@ expect_validate_failure() {
 
 missing="$(mktemp -d)"
 rmdir "$missing"
-expect_validate_failure T7a "$missing"
+expect_validate_failure T7a "$missing" "File not found"
 
 make_mod "const x = \$"
 mod_7b="$mod"
-expect_validate_failure T7b "$mod_7b"
+expect_validate_failure T7b "$mod_7b" "\$ itself is bound to a name"
 
-[ "$failed" -eq 0 ] && echo "T2/T7 check-calls: OK"
+[ "$failed" -eq 0 ] && echo "T2/T7/T9 check-calls: OK"
 exit "$failed"
