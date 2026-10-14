@@ -1,9 +1,11 @@
 import type { Register } from 'claude-code'
-import { autoStep } from './auto-step'
+import { autoStep, type AutoSignals } from './auto-step'
 import { resolveIssue } from './issue-resolver'
 import { loadIssue, saveIssue } from './issue-store'
 import { applyStep, invalidRequest, NOTE_MAX_LENGTH, REQUESTED_STEPS, STEPS } from './issue-step'
 const NO_ISSUE = 'No issue tracked on this branch. Do not retry; ask the user to switch to an issue branch.'
+// Recognizes a PR/MR creation in the command text, even when `gh`/`glab` is neutralized by a shell function.
+const PR_PATTERN = /gh pr create|glab mr create/
 
 // $ cannot cross an import, so the store helpers get closures limited to the calls they make.
 function closures($: any) {
@@ -86,9 +88,11 @@ async function observeBash($: any, e: any, result: any, options: any): Promise<v
 
   const command = typeof e.command === 'string' ? e.command : ''
   const io = closures($)
-  const signals: { testsPassed?: boolean } = {}
+  const succeeded = result?.isError !== true
+  const signals: AutoSignals = {}
   const testPattern = compileTestPattern(io, options.testPattern)
-  if (testPattern && testPattern.test(command)) signals.testsPassed = result?.isError !== true
+  if (testPattern && testPattern.test(command)) signals.testsPassed = succeeded
+  if (PR_PATTERN.test(command)) signals.prCreated = succeeded
   if (Object.keys(signals).length === 0) return
 
   const cwd = commandCwd(command) ?? await $.session.cwd()
