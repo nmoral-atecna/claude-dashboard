@@ -52,6 +52,7 @@ export const register: Register = (on, options) => {
     const tracked = await resolveIssue(io, await $.session.cwd(), String(options.branchPattern))
     if (tracked === null) return { result: NO_ISSUE }
     const current = await loadIssue(io, tracked.worktree, tracked.issue)
+    if (current === 'unreadable') return { result: `Failed to read issue ${tracked.issue}; see the transcript.` }
     const at = new Date(await $.clock.now()).toISOString()
     const outcome = applyStep(current, e, tracked, at)
     if ('refusal' in outcome) return { result: outcome.refusal }

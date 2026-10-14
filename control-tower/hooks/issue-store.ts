@@ -25,8 +25,12 @@ export async function saveIssue($: any, record: IssueRecord): Promise<boolean> {
   }
 }
 
-/** Reads the record from its JSON file; null when missing or unreadable. Never rejects. */
-export async function loadIssue($: any, worktree: string, issue: number): Promise<IssueRecord | null> {
+/** Reads the record from its JSON file; null when missing, 'unreadable' (logged) otherwise. Never rejects. */
+export async function loadIssue(
+  $: any,
+  worktree: string,
+  issue: number,
+): Promise<IssueRecord | null | 'unreadable'> {
   let label = `${worktree}/${issue}`
   try {
     const project = await projectOf($, worktree)
@@ -36,7 +40,7 @@ export async function loadIssue($: any, worktree: string, issue: number): Promis
     return JSON.parse(await $.fs.read(path))
   } catch (error: any) {
     logFailure($, 'read', label, error.message)
-    return null
+    return 'unreadable'
   }
 }
 
