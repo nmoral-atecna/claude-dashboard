@@ -4,10 +4,21 @@ const NOW = 1791892800000
 const NOW_ISO = '2026-10-13T12:00:00.000Z'
 const FILE = '/home/t/.claude/control-tower/repo/142.json'
 
+type EngineOpts = {
+  branch?: string
+  files?: Record<string, string>
+  result?: any
+  cwd?: string
+  toplevel?: string
+  removedWorktree?: string
+}
+
 // Answers every $ call the Bash observer makes; the bottom tool.call returns the Bash result.
-function engine(on: any, opts: { branch?: string; files?: Record<string, string>; result?: any; cwd?: string } = {}): any[] {
-  const { branch = 'feat/142-tva', files = {}, result = ok(), cwd = '/src/repo' } = opts
+// `removedWorktree` disappears once the tool ran: a `git worktree list` there then fails, like a real removal.
+function engine(on: any, opts: EngineOpts = {}): any[] {
+  const { branch = 'feat/142-tva', files = {}, result = ok(), cwd = '/src/repo', toplevel = '/src/repo', removedWorktree } = opts
   const calls: any[] = []
+  const state = { removed: false }
   on('session.cwd', async () => {
     calls.push({ kind: 'session.cwd' })
     return { value: cwd }
@@ -15,12 +26,18 @@ function engine(on: any, opts: { branch?: string; files?: Record<string, string>
   on('process.run', async ($b: any, e: any) => {
     calls.push({ kind: 'run', e })
     const [cmd, arg, target] = e.argv
+    if (arg === 'worktree' && state.removed && e.init?.cwd === removedWorktree) {
+      return { value: { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository\n' } }
+    }
     if (cmd === 'mv') {
       files[target] = files[arg]
       delete files[arg]
     }
     if (cmd === 'rm') delete files[target]
-    const stdout = arg === 'branch' ? `${branch}\n` : arg === 'worktree' ? 'worktree /src/repo\n' : '/src/repo\n'
+    const stdout = arg === 'branch' ? `${branch}\n`
+      : arg === 'rev-parse' ? `${toplevel}\n`
+      : arg === 'worktree' ? 'worktree /src/repo\n'
+      : '/src/repo\n'
     return { value: { exitCode: 0, stdout, stderr: '' } }
   })
   on('env.get', async ($b: any, e: any) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
@@ -38,6 +55,7 @@ function engine(on: any, opts: { branch?: string; files?: Record<string, string>
   })
   on('tool.call', async ($b: any, e: any) => {
     calls.push({ kind: 'core tool.call', e })
+    state.removed = true
     return result
   })
   return calls
@@ -247,6 +265,57 @@ test('C5.9 most-advanced-rule-wins-pr-over-tests', async ($: any, on: any) => {
   const saved = JSON.parse(files[FILE])
   expect(saved.step).toBe('mr')
   expect(saved.history).toEqual([{ step: 'mr', at: NOW_ISO, source: 'auto', note: 'make test && gh pr create' }])
+})
+
+const FILE99 = '/home/t/.claude/control-tower/repo/99.json'
+const record99 = (step: string, extra: any = {}) => ({
+  issue: 99,
+  title: null,
+  step,
+  blockedReason: null,
+  branch: 'feat/99-x',
+  worktree: '/w/ct-99',
+  history: [],
+  updatedAt: '2026-10-01T00:00:00.000Z',
+  ...extra,
+})
+const disk99 = (step: string) => ({ [FILE99]: JSON.stringify(record99(step)) })
+const removeOpts = (files: Record<string, string>, result?: any) => ({
+  branch: 'feat/99-x',
+  files,
+  result,
+  cwd: '/src/repo',
+  toplevel: '/w/ct-99',
+  removedWorktree: '/w/ct-99',
+})
+
+test('C4.1 worktree-remove-moves-the-removed-worktree-issue-to-termine', async ($: any, on: any) => {
+  const files = disk99('mr')
+  engine(on, removeOpts(files))
+  await bash($, 'git worktree remove /w/ct-99')
+  const saved = JSON.parse(files[FILE99])
+  expect(saved.step).toBe('termine')
+  expect(saved.history).toEqual([
+    { step: 'termine', at: NOW_ISO, source: 'auto', note: 'git worktree remove /w/ct-99' },
+  ])
+})
+
+test('C4.2 removing-an-untracked-worktree-changes-nothing', async ($: any, on: any) => {
+  const files: Record<string, string> = {}
+  const calls = engine(on, { branch: 'main', files, cwd: '/src/repo', toplevel: '/w/autre', removedWorktree: '/w/autre' })
+  await bash($, 'git worktree remove /w/autre')
+  expect(files).toEqual({})
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
+test('C4.3 failed-worktree-remove-stays', async ($: any, on: any) => {
+  const files = disk99('mr')
+  const before = files[FILE99]
+  const calls = engine(on, removeOpts(files, failed()))
+  await bash($, 'git worktree remove /w/ct-99')
+  expect(files[FILE99]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
 })
 
 test('C7.1 unrecognized-command-touches-nothing', async ($: any, on: any) => {

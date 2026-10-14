@@ -56,3 +56,23 @@ test('pr-created-at-mr-stays', async () => {
 test('C5.9 pr-rule-wins-over-tests-rule', async () => {
   expect(autoStep('tests-valides', { testsPassed: true, prCreated: true })).toBe('mr')
 })
+
+test('C4.1 worktree-removed-at-mr-moves-to-termine', async () => {
+  expect(autoStep('mr', { worktreeRemoved: true })).toBe('termine')
+})
+
+test('worktree-removed-jumps-from-spec-to-termine', async () => {
+  expect(autoStep('spec', { worktreeRemoved: true })).toBe('termine')
+})
+
+test('worktree-removed-at-termine-stays', async () => {
+  expect(autoStep('termine', { worktreeRemoved: true })).toBeNull()
+})
+
+test('worktree-remove-failed-stays', async () => {
+  expect(autoStep('mr', { worktreeRemoved: false })).toBeNull()
+})
+
+test('C5.9 worktree-rule-wins-over-pr-and-tests', async () => {
+  expect(autoStep('tests-valides', { testsPassed: true, prCreated: true, worktreeRemoved: true })).toBe('termine')
+})
