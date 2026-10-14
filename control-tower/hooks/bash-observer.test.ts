@@ -99,8 +99,10 @@ test('C5.1 cd-prefix-resolves-from-that-path', async ($: any, on: any) => {
   const calls = engine(on, { files, cwd: '/main/repo' })
   await bash($, 'cd /w/ct-99 && make test')
   expect(JSON.parse(files[FILE]).step).toBe('vert')
-  const gitCwds = of(calls, 'run').filter((c) => c.e.argv[0] === 'git').map((c) => c.e.init.cwd)
-  expect(gitCwds.every((d: string) => d === '/w/ct-99')).toBe(true)
+  const resolveCwds = of(calls, 'run')
+    .filter((c) => ['branch', 'rev-parse'].includes(c.e.argv[1]))
+    .map((c) => c.e.init.cwd)
+  expect(resolveCwds).toEqual(['/w/ct-99', '/w/ct-99'])
   expect(of(calls, 'session.cwd')).toHaveLength(0)
 })
 
