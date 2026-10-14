@@ -72,9 +72,13 @@ export const register: Register = (on, options) => {
 
   // Observes Bash commands and advances the tracked issue on mechanical cases; the result is left untouched.
   on('tool.call', { tool: 'Bash' }, async ($: any, e: any, next: any) => {
+    const command = typeof e.command === 'string' ? e.command : ''
+    const removePath = worktreeRemovePath(command)
+    // The removed worktree vanishes after next(e); resolve and load its issue while it still exists.
+    const removal = removePath !== null ? await loadRemoval($, options, removePath) : null
     const result = await next(e)
     try {
-      await observeBash($, e, result, options)
+      await observeBash($, command, result, options, removal)
     } catch {
       // An observer must never break the Bash call it watches.
     }
@@ -82,13 +86,20 @@ export const register: Register = (on, options) => {
   })
 }
 
-async function observeBash($: any, e: any, result: any, options: any): Promise<void> {
+async function observeBash($: any, command: string, result: any, options: any, removal: any): Promise<void> {
   const bash = result?.result
   if (bash?.backgroundTaskId != null || bash?.interrupted === true) return
-
-  const command = typeof e.command === 'string' ? e.command : ''
-  const io = closures($)
   const succeeded = result?.isError !== true
+
+  // Worktree removal was pre-resolved before next(e): the worktree no longer exists.
+  if (removal !== null) {
+    const target = autoStep(removal.current.step, { worktreeRemoved: succeeded })
+    if (target === null) return
+    await saveAuto($, closuresRedirect($, removal.worktree, removal.saveCwd), removal.current, target, command)
+    return
+  }
+
+  const io = closures($)
   const signals: AutoSignals = {}
   const testPattern = compileTestPattern(io, options.testPattern)
   if (testPattern && testPattern.test(command)) signals.testsPassed = succeeded
@@ -103,7 +114,20 @@ async function observeBash($: any, e: any, result: any, options: any): Promise<v
 
   const target = autoStep(current.step, signals)
   if (target === null) return
+  await saveAuto($, io, current, target, command)
+}
 
+/** Resolves and loads the issue of `path` before its worktree is removed; null when it is not tracked. */
+async function loadRemoval($: any, options: any, path: string): Promise<any> {
+  const io = closures($)
+  const tracked = await resolveIssue(io, path, String(options.branchPattern))
+  if (tracked === null) return null
+  const current = await loadIssue(io, tracked.worktree, tracked.issue)
+  if (current === null || current === 'unreadable') return null
+  return { current, worktree: tracked.worktree, saveCwd: await $.session.cwd() }
+}
+
+async function saveAuto($: any, io: any, current: any, target: string, command: string): Promise<void> {
   const at = new Date(await $.clock.now()).toISOString()
   await saveIssue(io, {
     ...current,
@@ -127,4 +151,27 @@ function compileTestPattern(io: any, pattern: unknown): RegExp | null {
 function commandCwd(command: string): string | null {
   const match = /^cd\s+(\S+)\s+&&/.exec(command)
   return match ? match[1] : null
+}
+
+// The worktree `git worktree remove` targets, i.e. its first non-flag argument.
+// shortcut: <path> has no spaces; upgrade when quoted or escaped paths must be handled.
+function worktreeRemovePath(command: string): string | null {
+  const match = /git worktree remove\b(.*)/.exec(command)
+  if (match === null) return null
+  const path = match[1].trim().split(/\s+/).find((arg) => arg.length > 0 && !arg.startsWith('-'))
+  return path ?? null
+}
+
+// The removed worktree is gone, yet the store derives the project by running git there; redirect that
+// one call to a surviving directory (the main repo), which yields the same project name.
+function closuresRedirect($: any, removedWorktree: string, saveCwd: string) {
+  const io = closures($)
+  const run = io.process.run
+  return {
+    ...io,
+    process: {
+      run: (argv: string[], init: any) =>
+        run(argv, init && init.cwd === removedWorktree ? { ...init, cwd: saveCwd } : init),
+    },
+  }
 }

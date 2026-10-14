@@ -2,8 +2,7 @@ import type { Step } from 'claude-code'
 import { STEPS } from './issue-step'
 
 // Each signal is set only when the command matches its rule; its boolean is whether the command succeeded.
-// A later milestone adds `worktreeRemoved`.
-export type AutoSignals = { testsPassed?: boolean; prCreated?: boolean }
+export type AutoSignals = { testsPassed?: boolean; prCreated?: boolean; worktreeRemoved?: boolean }
 
 /**
  * The step a mechanical rule moves the issue to, or null when none applies.
@@ -18,6 +17,10 @@ export function autoStep(step: Step, signals: AutoSignals): Step | null {
   }
   if (signals.prCreated !== undefined) {
     const target = prTarget(step, signals.prCreated)
+    if (target !== null) candidates.push(target)
+  }
+  if (signals.worktreeRemoved !== undefined) {
+    const target = worktreeTarget(step, signals.worktreeRemoved)
     if (target !== null) candidates.push(target)
   }
   return candidates.reduce<Step | null>(
@@ -39,4 +42,10 @@ function testsTarget(step: Step, passed: boolean): Step | null {
 function prTarget(step: Step, succeeded: boolean): Step | null {
   if (!succeeded) return null
   return STEPS.indexOf(step) < STEPS.indexOf('mr') ? 'mr' : null
+}
+
+/** A successful worktree removal moves any step to `termine`; never from `termine` back. */
+function worktreeTarget(step: Step, succeeded: boolean): Step | null {
+  if (!succeeded) return null
+  return step !== 'termine' ? 'termine' : null
 }
