@@ -18,14 +18,14 @@ function engine(on: any, disk: Disk, state: Record<string, any> = {}, result: an
   on('fs.exists', async ($b: any, e: any) => ({ value: e.path === DIR ? !disk.noDir : e.path in files }))
   on('fs.list', async ($b: any, e: any) => {
     calls.push({ kind: 'list', e })
-    if (disk.listError) throw new Error(disk.listError)
+    if (disk.listError) return { deny: disk.listError }
     return { value: Object.keys(files).map((path) => ({ name: path.slice(DIR.length + 1), kind: 'file' })) }
   })
   on('fs.read', async ($b: any, e: any) => ({ value: files[e.path] }))
   on('state.set', async ($b: any, e: any) => {
     calls.push({ kind: 'state.set', e })
     state[e.id === undefined ? e.key : `${e.key}/${e.id}`] = e.value
-    return { isSet: true, version: 1 }
+    return { value: { isSet: true, version: 1 } }
   })
   on('ui.log', async ($b: any, e: any) => {
     calls.push({ kind: 'log', e })
@@ -134,6 +134,7 @@ test('C4.2 directory-error-writes-nothing-logs-and-starts', async ($: any, on: a
   expect(of(calls, 'state.set')).toHaveLength(0)
   const logs = of(calls, 'log')
   expect(logs).toHaveLength(1)
-  expect(logs[0].e.text).toBe('control-tower: reload failed demo: EACCES: permission denied')
+  // <error> is the message the engine raises for the denied $.fs.list.
+  expect(logs[0].e.text).toBe('control-tower: reload failed demo: control-tower: $.fs.list: EACCES: permission denied')
   expect(logs[0].e.to).toBe('transcript')
 })

@@ -47,6 +47,40 @@ export async function loadIssue(
   }
 }
 
+/** Mirrors every readable record of the cwd's project in $.state, then their sorted ids. Never rejects. */
+export async function reloadIssues($: any, cwd: string): Promise<void> {
+  let project: string
+  try {
+    project = await projectOf($, cwd)
+  } catch {
+    return // Outside a git repository there is no project to reload.
+  }
+  try {
+    const dir = await storeDir($, project)
+    const entries = (await $.fs.exists(dir)) ? await $.fs.list(dir) : []
+    const ids = entries
+      .map((entry: any) => /^(\d+)\.json$/.exec(entry.name))
+      .filter((match: RegExpExecArray | null) => match !== null)
+      .map((match: RegExpExecArray) => Number(match[1]))
+      .sort((a: number, b: number) => a - b)
+    const loaded: number[] = []
+    for (const issue of ids) {
+      let record: IssueRecord
+      try {
+        record = JSON.parse(await $.fs.read(`${dir}/${issue}.json`))
+      } catch (error: any) {
+        logFailure($, 'read', `${project}/${issue}`, error.message)
+        continue
+      }
+      await $.state.set({ plugin: 'control-tower', key: 'issues', id: String(issue) }, record)
+      loaded.push(issue)
+    }
+    await $.state.set({ plugin: 'control-tower', key: 'issueIds' }, loaded)
+  } catch (error: any) {
+    logFailure($, 'reload', project, error.message)
+  }
+}
+
 /** Basename of the main worktree, i.e. the first `worktree` line of `git worktree list --porcelain`. */
 async function projectOf($: any, worktree: string): Promise<string> {
   const git = await run($, ['git', 'worktree', 'list', '--porcelain'], { cwd: worktree })
@@ -56,9 +90,13 @@ async function projectOf($: any, worktree: string): Promise<string> {
 }
 
 async function issuePath($: any, project: string, issue: number): Promise<string> {
+  return `${await storeDir($, project)}/${issue}.json`
+}
+
+async function storeDir($: any, project: string): Promise<string> {
   const home = await $.env.get('HOME')
   if (!home) throw new Error('HOME is not set')
-  return `${home}/.claude/control-tower/${project}/${issue}.json`
+  return `${home}/.claude/control-tower/${project}`
 }
 
 // A rejected mv must still trigger the temp cleanup, so process.run rejections become failed exits.
@@ -70,6 +108,6 @@ async function run($: any, argv: string[], init: { cwd?: string } = {}): Promise
   }
 }
 
-function logFailure($: any, action: 'save' | 'read', label: string, message: string): void {
+function logFailure($: any, action: 'save' | 'read' | 'reload', label: string, message: string): void {
   $.ui.log(`control-tower: ${action} failed ${label}: ${message.trimEnd()}`, { to: 'transcript' })
 }

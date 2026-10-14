@@ -1,7 +1,7 @@
 import type { Register } from 'claude-code'
 import { autoStep, type AutoSignals } from './auto-step'
 import { resolveIssue } from './issue-resolver'
-import { loadIssue, saveIssue } from './issue-store'
+import { loadIssue, reloadIssues, saveIssue } from './issue-store'
 import { applyStep, invalidRequest, NOTE_MAX_LENGTH, REQUESTED_STEPS, STEPS } from './issue-step'
 const NO_ISSUE = 'No issue tracked on this branch. Do not retry; ask the user to switch to an issue branch.'
 // Matches a PR/MR creation run as a command (start, or after `&&`/`;`/`|`), even if `gh`/`glab` is a shell function.
@@ -14,15 +14,18 @@ function closures($: any) {
     ui: { log: (text: string, init: any) => $.ui.log(text, init) },
     fs: {
       exists: (path: string) => $.fs.exists(path),
+      list: (path: string) => $.fs.list(path),
       read: (path: string) => $.fs.read(path),
       write: (path: string, text: string) => $.fs.write(path, text),
     },
     // $.env.get needs a literal name; HOME is the only variable the store reads.
     env: { get: () => $.env.get('HOME') },
     clock: { now: () => $.clock.now() },
-    // $.state.set needs a literal plugin and key; the store only writes control-tower.issues.
+    // $.state.set needs a literal plugin and key; the store only writes control-tower.issues and issueIds.
     state: {
-      set: (ref: any, value: any) => $.state.set({ plugin: 'control-tower', key: 'issues', id: ref.id }, value),
+      set: (ref: any, value: any) => ref.key === 'issueIds'
+        ? $.state.set({ plugin: 'control-tower', key: 'issueIds' }, value)
+        : $.state.set({ plugin: 'control-tower', key: 'issues', id: ref.id }, value),
     },
   }
 }
@@ -48,6 +51,12 @@ const SET_ISSUE_STEP = {
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.tool.register(SET_ISSUE_STEP)
+    return next(e)
+  })
+
+  // Reloads the project's records on every source (startup, resume, clear, compact, fork); the result is left untouched.
+  on('classic.SessionStart', async ($: any, e: any, next: any) => {
+    await reloadIssues(closures($), e.cwd)
     return next(e)
   })
 

@@ -35,6 +35,10 @@ declare module 'claude-code' {
   }
 
   interface PluginState {
-    'control-tower': { issues: StateFamily<IssueRecord> }
+    'control-tower': {
+      issues: StateFamily<IssueRecord>
+      /** Issue numbers of the session project's records, sorted ascending */
+      issueIds: number[]
+    }
   }
 }
