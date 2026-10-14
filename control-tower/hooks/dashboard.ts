@@ -54,25 +54,27 @@ export function composeRows(
   return rows.sort(compareRows)
 }
 
-/** One rendered line per row, truncated to `bodyColumns`; the empty message when there is none. */
-export function renderDashboard(rows: DashboardRow[], bodyColumns: number): string[] {
-  if (rows.length === 0) return [EMPTY_MESSAGE]
-  return rows.map((row) => renderRow(row, bodyColumns))
-}
+/** Column header labels, in English for consistency with the other UI texts (C8). */
+const HEADER = ['ISSUE', 'TITLE', 'STEP', 'NOTE', 'AGE']
+const SEP = '  '
+const TITLE_COL = 1
+const NOTE_COL = 3
 
 /**
- * `#n  label  step[ marks]  note  age`, never wider than `bodyColumns`.
- * Label and note evenly share the columns left after the fixed fields and separators.
+ * A header line then one line per row, as left-aligned columns padded to their widest
+ * content (header included), `SEP` apart, each line no wider than `bodyColumns` (C7.1).
+ * On overflow the flexible TITLE and NOTE columns shrink (`…`) by an even split (the odd
+ * char goes to NOTE), while ISSUE/STEP/AGE keep their content width. No header when empty.
  */
-export function renderRow(row: DashboardRow, bodyColumns: number): string {
-  const sep = '  '
-  const head = `#${row.issue}`
-  const stepField = row.marks.length > 0 ? `${row.step} ${row.marks.join(' ')}` : row.step
-  const fixed = head.length + stepField.length + row.age.length + sep.length * 4
-  const remaining = Math.max(0, bodyColumns - fixed)
-  const labelBudget = Math.floor(remaining / 2)
-  const noteBudget = remaining - labelBudget
-  return [head, truncate(row.label, labelBudget), stepField, truncate(row.note, noteBudget), row.age].join(sep)
+export function renderDashboard(rows: DashboardRow[], bodyColumns: number): string[] {
+  if (rows.length === 0) return [EMPTY_MESSAGE]
+  const grid = [HEADER, ...rows.map(rowCells)]
+  const widths = HEADER.map((_, col) => Math.max(...grid.map((cells) => cells[col].length)))
+  fitFlexibleColumns(widths, bodyColumns)
+  const last = widths.length - 1
+  return grid.map((cells) =>
+    cells.map((text, col) => (col === last ? text : truncate(text, widths[col]).padEnd(widths[col]))).join(SEP),
+  )
 }
 
 /** The issue numbers whose worktree is gone, excluding `termine`; empty when git failed (porcelain null). */
@@ -137,6 +139,23 @@ function lastNote(record: IssueRecord): string {
     if (note !== null) return note
   }
   return NO_NOTE
+}
+
+/** The five column cells of a row: `#n`, label, step (+ marks), note, age. */
+function rowCells(row: DashboardRow): string[] {
+  const step = row.marks.length > 0 ? `${row.step} ${row.marks.join(' ')}` : row.step
+  return [`#${row.issue}`, row.label, step, row.note, row.age]
+}
+
+/** Shrinks TITLE and NOTE in place to fit `bodyColumns`; a no-op when everything already fits. */
+function fitFlexibleColumns(widths: number[], bodyColumns: number): void {
+  const separators = (widths.length - 1) * SEP.length
+  const total = widths.reduce((sum, width) => sum + width, 0) + separators
+  if (total <= bodyColumns) return
+  const fixed = widths[0] + widths[2] + widths[4] + separators
+  const available = Math.max(0, bodyColumns - fixed)
+  widths[TITLE_COL] = Math.floor(available / 2)
+  widths[NOTE_COL] = available - widths[TITLE_COL]
 }
 
 function parseWorktreePaths(porcelain: string): Set<string> {
