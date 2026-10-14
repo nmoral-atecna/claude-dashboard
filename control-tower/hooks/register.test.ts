@@ -21,6 +21,7 @@ function engine(on: any, branch: string, files: Record<string, string> = {}, fai
     return { value: { tool: `mcp__control-tower__${e.name}` } }
   })
   on('session.cwd', async () => ({ value: '/src/repo' }))
+  on('ui.panes', async () => ({ value: [] }))
   on('process.run', async ($b: any, e: any) => {
     calls.push({ kind: 'run', e })
     const [cmd, arg, target] = e.argv

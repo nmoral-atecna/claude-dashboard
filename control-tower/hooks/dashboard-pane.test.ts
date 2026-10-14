@@ -1,4 +1,4 @@
-import { test, expect } from 'claude-code/testing'
+import { test, expect, mock } from 'claude-code/testing'
 import type { HistoryEntry, IssueRecord, Step } from 'claude-code'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
@@ -36,7 +36,9 @@ function engine(on: any, opts: { issueIds?: number[]; records?: Record<number, I
   const records = opts.records ?? {}
   const panes: { id: string; title: string }[] = []
   const registered: any[] = []
+  const clock = mock.clock(on, { now: NOW })
   on('session.start', async ($b: any, e: any) => ({ cwd: e.cwd }))
+  on('session.cwd', async () => ({ value: '/src/repo' }))
   on('tool.register', async ($b: any, e: any) => ({ value: { tool: `mcp__control-tower__${e.name}` } }))
   on('command.register', async ($b: any, e: any) => {
     registered.push(e)
@@ -54,7 +56,6 @@ function engine(on: any, opts: { issueIds?: number[]; records?: Record<number, I
     return { value: undefined }
   })
   on('ui.panes', async () => ({ value: panes.map((p) => ({ id: p.id, title: p.title, isPlaced: true })) }))
-  on('clock.now', async () => ({ value: NOW }))
   on('state.get', async ($b: any, e: any) => {
     if (e.key === 'issueIds') return { value: { value: issueIds, version: 1 } }
     const rec = records[Number(e.id)]
@@ -70,7 +71,7 @@ function engine(on: any, opts: { issueIds?: number[]; records?: Record<number, I
   on('state.set', async () => ({ value: { isSet: true, version: 1 } }))
   on('classic.SessionStart', async () => ({}))
   on('ui.log', async () => ({ value: undefined }))
-  return { panes, registered }
+  return { panes, registered, clock }
 }
 
 const ids = (panes: { id: string }[]) => panes.map((p) => p.id)
@@ -78,17 +79,19 @@ const ids = (panes: { id: string }[]) => panes.map((p) => p.id)
 // C1 — /dash toggles the pane
 
 test('C1.1 dash-opens-the-closed-pane', async ($: any, on: any) => {
-  const { panes } = engine(on)
+  const { panes, clock } = engine(on)
   await $.session.start({ cwd: '/src/repo' })
   const answer = await $.command.run({ command: 'dash' })
   expect(answer.text).toBe('Dashboard opened.')
   expect(ids(panes)).toContain(PANE)
+  await clock.settle() // let the open's immediate refresh finish before teardown
 })
 
 test('C1.2 dash-closes-the-open-pane', async ($: any, on: any) => {
-  const { panes } = engine(on)
+  const { panes, clock } = engine(on)
   await $.session.start({ cwd: '/src/repo' })
   await $.command.run({ command: 'dash' })
+  await clock.settle() // let the open's immediate refresh finish before closing
   const answer = await $.command.run({ command: 'dash' })
   expect(answer.text).toBe('Dashboard closed.')
   expect(ids(panes)).not.toContain(PANE)
