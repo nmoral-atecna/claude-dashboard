@@ -75,13 +75,8 @@ async function refresh($: any): Promise<void> {
   const cwd = await $.session.cwd()
   await reloadIssues($, cwd)
   const porcelain = await worktreeList($, cwd)
-  const { value: issueIds = [] } = await $.state.get({ plugin: 'control-tower', key: 'issueIds' })
-  const issues: Record<number, IssueRecord> = {}
-  for (const id of issueIds as number[]) {
-    const { value } = await $.state.get({ plugin: 'control-tower', key: 'issues', id: String(id) })
-    if (value) issues[id] = value
-  }
-  const orphans = orphanIssues(porcelain, issueIds as number[], issues)
+  const { issueIds, issues } = await readIssues($)
+  const orphans = orphanIssues(porcelain, issueIds, issues)
   await $.state.set({ plugin: 'control-tower', key: 'dashboardOrphans' }, [...orphans])
 }
 
@@ -97,13 +92,19 @@ async function worktreeList($: any, cwd: string): Promise<string | null> {
 
 /** The lines to draw: records and orphans read from $.state, composed and rendered by the pure rules. */
 async function dashboardLines($: any, bodyColumns: number, now: number): Promise<string[]> {
+  const { issueIds, issues } = await readIssues($)
+  const { value: orphans = [] } = await $.state.get({ plugin: 'control-tower', key: 'dashboardOrphans' })
+  const rows = composeRows(issueIds, issues, new Set(orphans as number[]), now)
+  return renderDashboard(rows, bodyColumns)
+}
+
+/** The tracked issue ids and their records, read from $.state. */
+async function readIssues($: any): Promise<{ issueIds: number[]; issues: Record<number, IssueRecord> }> {
   const { value: issueIds = [] } = await $.state.get({ plugin: 'control-tower', key: 'issueIds' })
   const issues: Record<number, IssueRecord> = {}
   for (const id of issueIds as number[]) {
     const { value } = await $.state.get({ plugin: 'control-tower', key: 'issues', id: String(id) })
     if (value) issues[id] = value
   }
-  const { value: orphans = [] } = await $.state.get({ plugin: 'control-tower', key: 'dashboardOrphans' })
-  const rows = composeRows(issueIds as number[], issues, new Set(orphans as number[]), now)
-  return renderDashboard(rows, bodyColumns)
+  return { issueIds: issueIds as number[], issues }
 }
