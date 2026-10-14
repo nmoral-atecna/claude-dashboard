@@ -4,8 +4,8 @@ import { resolveIssue } from './issue-resolver'
 import { loadIssue, saveIssue } from './issue-store'
 import { applyStep, invalidRequest, NOTE_MAX_LENGTH, REQUESTED_STEPS, STEPS } from './issue-step'
 const NO_ISSUE = 'No issue tracked on this branch. Do not retry; ask the user to switch to an issue branch.'
-// Recognizes a PR/MR creation in the command text, even when `gh`/`glab` is neutralized by a shell function.
-const PR_PATTERN = /gh pr create|glab mr create/
+// Matches a PR/MR creation run as a command (start, or after `&&`/`;`/`|`), even if `gh`/`glab` is a shell function.
+const PR_PATTERN = /(^|[;&|]\s*)(gh pr create|glab mr create)\b/
 
 // $ cannot cross an import, so the store helpers get closures limited to the calls they make.
 function closures($: any) {
