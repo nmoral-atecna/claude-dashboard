@@ -53,13 +53,15 @@ scripts/check-calls.test.sh
 - `control-tower/hooks/hooks.json`: declares the hook module `./register.ts`.
 - `control-tower/hooks/register.ts`: registers `session.start` (registers the
   [`set_issue_step` tool](#set_issue_step-tool), then passes the event through),
-  the `tool.call` hook that answers that tool, and the `tool.call` hook on `Bash`
-  that observes commands (see [Automatic transitions](#automatic-transitions)).
+  the `tool.call` hook that answers that tool, the `tool.call` hook on `Bash`
+  that observes commands (see [Automatic transitions](#automatic-transitions)),
+  and the `classic.SessionStart` hook that reloads the project's records (see
+  [`reloadIssues`](#reloadissues-cwd)).
 - `control-tower/hooks/register.test.ts`: run by `claude plugin test`.
 - `control-tower/hooks/bash-observer.test.ts`: tests of the `Bash` observer
   through the hook, with a fake engine answering its `$` calls.
-- `control-tower/hooks/issue-store.ts`: issue store (`saveIssue`, `loadIssue`),
-  used by the `set_issue_step` hook.
+- `control-tower/hooks/issue-store.ts`: issue store (`saveIssue`, `loadIssue`,
+  `reloadIssues`), used by the `set_issue_step` and `classic.SessionStart` hooks.
 - `control-tower/hooks/issue-store.test.ts`: unit tests of the store with a
   hand-written fake `$` (the `$` given to plugin tests exposes neither `fs`,
   `process`, `env`, `state` nor `clock`).
@@ -120,7 +122,10 @@ the complete record.
    run in the store directory, never in the session cwd, which may be a
    removed worktree.
 3. Only after a successful `mv`, mirrors the full record in `$.state` under
-   `{ plugin: "control-tower", key: "issues", id: "<issue>" }`, and returns `true`.
+   `{ plugin: "control-tower", key: "issues", id: "<issue>" }`.
+4. Adds the issue number to `control-tower.issueIds` (see
+   [Session reload](#session-reload)) when it is not there yet, keeping the list
+   sorted, and returns `true`.
 
 It never rejects. On any failure (git, `HOME` unset, write, `mv`, or any
 rejected `$` call) it logs one line to the transcript and returns `false`, leaving
@@ -132,6 +137,10 @@ control-tower: save failed <project>/<issue>: <message>
 
 `<project>` is replaced by the worktree path when git fails. The message is the
 process `stderr` (trailing newline trimmed) or the error message.
+
+A rejected `$.state` call while adding to `issueIds` also logs `save failed` and
+returns `false`, the file and the `issues` mirror being already written; the
+next [reload](#session-reload) corrects `issueIds`.
 
 ### `loadIssue($, worktree, issue)`
 
@@ -145,6 +154,69 @@ touches `$.state`.
 
 The content is only `JSON.parse`d; its shape is not checked.
 
+### Session reload
+
+At every `classic.SessionStart`, whatever its source (`startup`, `resume`,
+`clear`, `compact`, `fork`), the mod reloads in `$.state` the records of the
+session's project, so the session sees the issues as they are on disk. Other
+projects are never loaded: issue numbers are not unique across projects.
+
+State keys (contract in `control-tower/types/index.d.ts`):
+
+| Key | Content |
+|-----|---------|
+| `control-tower.issues`, id `<issue>` | the full record |
+| `control-tower.issueIds` | issue numbers of the project's records, sorted ascending |
+
+`$.state` only offers `get` and `set`: the `issues` family cannot be listed and
+an entry cannot be deleted. `issueIds` is therefore the list readers must use
+to know which issues exist (the prompt banner, issue #7, and `/dash`,
+issue #8, are meant to read it).
+
+### `reloadIssues($, cwd)`
+
+Called by the `classic.SessionStart` hook with the event's `cwd`. It never
+rejects.
+
+1. Finds `<project>` from `cwd` as for the store (main worktree basename).
+2. Lists `$HOME/.claude/control-tower/<project>/`; only files named
+   `<integer>.json` are records (temporary files, `notes.txt`, `abc.json` are
+   ignored).
+3. Reads and parses each record, in ascending order, and sets
+   `issues[<issue>]` to its content.
+4. Sets `issueIds` to the numbers of the records actually loaded.
+
+Outcomes:
+
+- missing directory: `issueIds` is `[]`, nothing logged;
+- `cwd` outside a git repository: nothing written in `$.state`, nothing logged;
+- unreadable record (invalid JSON or read error): skipped, absent from
+  `issueIds`, its `issues` entry left unchanged, and
+  `control-tower: read failed <project>/<issue>: <message>` logged; the other
+  records still load;
+- error on the directory (listing, `HOME` unset): nothing written in `$.state`
+  and `control-tower: reload failed <project>: <message>` logged.
+
+The hook then calls `next(e)`: the `SessionStart` result (e.g. the
+`additionalContext` of another hook) is passed through unchanged, and a reload
+failure never prevents the session from starting.
+
+### Reload limits
+
+- The records are read one after the other, before `next(e)`: the session start
+  waits for the whole reload.
+- A record deleted from disk leaves `issueIds` at the next reload, but its
+  `issues` entry stays in `$.state` until the end of the session: only
+  `issueIds` is authoritative.
+- `saveIssue` adds to `issueIds` with a compare-and-set on the state version, so
+  two saves of the same session do not drop a number; after 3 conflicting
+  attempts it gives up silently, and the next `SessionStart` reload catches up.
+- `classic.SessionStart` hooks do not run for a plugin installed by the user
+  when an organization manages Claude Code (unless the plugin is listed in the
+  managed settings): no reload happens there.
+- `007.json` and `7.json` side by side give `7` twice in `issueIds`
+  (issue #23).
+
 ### Notes
 
 - Every `$.process.run` of the store has `timeoutMs: 1000`.
@@ -153,7 +225,7 @@ The content is only `JSON.parse`d; its shape is not checked.
 - The state contract has no `import` and uses the form
   `declare module 'claude-code' { interface PluginState { ... } }`;
   `claude plugin validate --strict control-tower` notes
-  `declares state: control-tower.issues`.
+  `declares state: control-tower.issues, control-tower.issueIds`.
 - `validate` only reports the `$` calls written in `register.ts`; the store's
   calls are seen by `scripts/check-calls.sh` through the delegation object of
   `register.ts` (see [Constraints](#constraints)).
@@ -400,11 +472,13 @@ issue is resolved from the cwd of the main session, or from a leading
 ## Constraints
 
 The engine refuses to pass `$` to an imported function. `register.ts`
-therefore gives `resolveIssue`, `loadIssue` and `saveIssue` a delegation object
-(built by `closures($)`, shared by both hooks) whose closures call `$` only for the calls these helpers make. Two calls
-need literal arguments to pass `validate`: `env.get` always reads `HOME`, and
-`state.set` always writes plugin `control-tower`, key `issues` (only `id` comes
-from the caller). A new `$` call in a helper must be added to this object.
+therefore gives `resolveIssue`, `loadIssue`, `saveIssue` and `reloadIssues` a
+delegation object (built by `closures($)`, shared by the hooks) whose closures
+call `$` only for the calls these helpers make. Some calls need literal
+arguments to pass `validate`: `env.get` always reads `HOME`, `state.get` always
+reads `control-tower.issueIds`, and `state.set` writes `control-tower.issueIds`
+when the caller's key is `issueIds`, otherwise `control-tower.issues` (only
+`id` comes from the caller). A new `$` call in a helper must be added to this object.
 
 
 Mod code uses no `setTimeout`, `fetch` or Node API: only `$.clock`, `$.fs`,
