@@ -96,7 +96,7 @@ async function observeBash($: any, command: string, result: any, options: any, r
   if (removal !== null) {
     const target = autoStep(removal.current.step, { worktreeRemoved: succeeded })
     if (target === null) return
-    await saveAuto($, closuresRedirect($, removal.worktree, removal.saveCwd), removal.current, target, command)
+    await saveAuto($, closuresRedirect($, removal.worktree, removal.mainWorktree), removal.current, target, command)
     return
   }
 
@@ -132,7 +132,10 @@ async function loadRemoval($: any, options: any, path: string): Promise<any> {
   if (tracked === null) return null
   const current = await loadIssue(io, tracked.worktree, tracked.issue)
   if (current === null || current === 'unreadable') return null
-  return { current, worktree: tracked.worktree, saveCwd: await $.session.cwd() }
+  const git = await io.process.run(['git', 'worktree', 'list', '--porcelain'],
+    { cwd: tracked.worktree, timeoutMs: 1000 })
+  if (git.exitCode !== 0) return null
+  return { current, worktree: tracked.worktree, mainWorktree: git.stdout.split('\n')[0].slice('worktree '.length) }
 }
 
 async function saveAuto($: any, io: any, current: any, target: string, command: string): Promise<void> {
@@ -161,25 +164,25 @@ function commandCwd(command: string): string | null {
   return match ? match[1] : null
 }
 
-// The worktree `git worktree remove` targets, i.e. its first non-flag argument.
+// The worktree `git worktree remove` targets (run as a command, like PR_PATTERN), i.e. its first non-flag argument.
 // shortcut: <path> has no spaces; upgrade when quoted or escaped paths must be handled.
 function worktreeRemovePath(command: string): string | null {
-  const match = /git worktree remove\b(.*)/.exec(command)
+  const match = /(?:^|[;&|]\s*)git worktree remove\b(.*)/.exec(command)
   if (match === null) return null
   const path = match[1].trim().split(/\s+/).find((arg) => arg.length > 0 && !arg.startsWith('-'))
   return path ?? null
 }
 
 // The removed worktree is gone, yet the store derives the project by running git there; redirect that
-// one call to a surviving directory (the main repo), which yields the same project name.
-function closuresRedirect($: any, removedWorktree: string, saveCwd: string) {
+// one call to the main worktree, noted before removal: the session cwd may be the removed worktree itself.
+function closuresRedirect($: any, removedWorktree: string, mainWorktree: string) {
   const io = closures($)
   const run = io.process.run
   return {
     ...io,
     process: {
       run: (argv: string[], init: any) =>
-        run(argv, init && init.cwd === removedWorktree ? { ...init, cwd: saveCwd } : init),
+        run(argv, init && init.cwd === removedWorktree ? { ...init, cwd: mainWorktree } : init),
     },
   }
 }
