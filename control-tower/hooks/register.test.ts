@@ -332,3 +332,21 @@ test('C6.3 bloque-without-blocked-reason-is-refused', async ($: any, on: any) =>
   expect(files).toEqual({ [FILE]: before })
   expect(of(calls, 'write')).toHaveLength(0)
 })
+
+test('C3.1 set-issue-step-adds-a-new-issue-to-issue-ids', async ($: any, on: any) => {
+  engine(on, 'feat/142-tva', {})
+  const ids = { value: [7, 12] as number[], version: 1 }
+  const inits: any[] = []
+  on('state.get', async ($b: any, e: any) => ({ value: e.key === 'issueIds' ? ids : { version: 0 } }))
+  on('state.set', async ($b: any, e: any) => {
+    if (e.key !== 'issueIds') return { value: { isSet: true, version: 1 } }
+    inits.push(e.ifVersion)
+    if (e.ifVersion !== ids.version) return { value: { isSet: false, version: ids.version } }
+    ids.value = e.value
+    ids.version += 1
+    return { value: { isSet: true, version: ids.version } }
+  })
+  expect(await call($, { step: 'spec' })).toBe('Issue 142 moved to `spec`.')
+  expect(ids.value).toEqual([7, 12, 142])
+  expect(inits).toEqual([1])
+})
