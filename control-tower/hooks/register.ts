@@ -21,10 +21,11 @@ function closures($: any) {
     // $.env.get needs a literal name; HOME is the only variable the store reads.
     env: { get: () => $.env.get('HOME') },
     clock: { now: () => $.clock.now() },
-    // $.state.set needs a literal plugin and key; the store only writes control-tower.issues and issueIds.
+    // $.state needs a literal plugin and key; the store only reads issueIds and writes it and issues.
     state: {
-      set: (ref: any, value: any) => ref.key === 'issueIds'
-        ? $.state.set({ plugin: 'control-tower', key: 'issueIds' }, value)
+      get: () => $.state.get({ plugin: 'control-tower', key: 'issueIds' }),
+      set: (ref: any, value: any, init?: any) => ref.key === 'issueIds'
+        ? $.state.set({ plugin: 'control-tower', key: 'issueIds' }, value, init)
         : $.state.set({ plugin: 'control-tower', key: 'issues', id: ref.id }, value),
     },
   }
