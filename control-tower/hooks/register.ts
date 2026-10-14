@@ -51,7 +51,7 @@ const SET_ISSUE_STEP = {
 }
 
 export const register: Register = (on, options) => {
-  registerDashboard(on, options)
+  registerDashboard(on)
 
   on('session.start', async ($, e, next) => {
     await $.tool.register(SET_ISSUE_STEP)
