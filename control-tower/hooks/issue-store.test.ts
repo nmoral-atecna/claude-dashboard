@@ -22,6 +22,7 @@ function record(issue = 2, worktree = '/src/feat-2'): any {
 function fake(options: any = {}): { $: any; calls: any[] } {
   const calls: any[] = []
   const ok = { exitCode: 0, stdout: '', stderr: '' }
+  const ids = { value: options.issueIds, version: options.issueIds === undefined ? 0 : 1 }
   const $: any = {
     env: {
       get: async (name: string) => {
@@ -64,10 +65,19 @@ function fake(options: any = {}): { $: any; calls: any[] } {
         return ok
       },
     },
+    // issueIds is versioned like the host's $.state: a set with a stale ifVersion is refused.
     state: {
-      set: async (ref: any, value: any) => {
-        calls.push({ kind: 'state.set', ref, value })
-        return { isSet: true, version: 1 }
+      get: async (ref: any) => {
+        calls.push({ kind: 'state.get', ref })
+        return ids.value === undefined ? { version: ids.version } : { value: ids.value, version: ids.version }
+      },
+      set: async (ref: any, value: any, init: any) => {
+        calls.push({ kind: 'state.set', ref, value, init })
+        if (ref.key !== 'issueIds') return { isSet: true, version: 1 }
+        if (init?.ifVersion !== undefined && init.ifVersion !== ids.version) return { isSet: false, version: ids.version }
+        ids.value = value
+        ids.version += 1
+        return { isSet: true, version: ids.version }
       },
     },
     ui: { log: (text: string, opts: any) => calls.push({ kind: 'log', text, opts }) },
@@ -76,6 +86,7 @@ function fake(options: any = {}): { $: any; calls: any[] } {
 }
 
 const of = (calls: any[], kind: string) => calls.filter((c) => c.kind === kind)
+const issueIdsOf = async ($: any) => (await $.state.get({ plugin: 'control-tower', key: 'issueIds' })).value
 const runs = (calls: any[], cmd: string) => of(calls, 'run').filter((c) => c.argv[0] === cmd)
 const gitFails = { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository\n' }
 const mvFails = { exitCode: 1, stdout: '', stderr: 'mv: cannot move\n' }
@@ -114,7 +125,7 @@ test('T2 save-derives-project-from-main-worktree', async () => {
 test('T3 save-mirrors-record-in-state', async () => {
   const { $, calls } = fake()
   await saveIssue($, record())
-  const sets = of(calls, 'state.set')
+  const sets = of(calls, 'state.set').filter((c) => c.ref.key === 'issues')
   expect(sets).toHaveLength(1)
   expect(sets[0].ref).toEqual({ plugin: 'control-tower', key: 'issues', id: '2' })
   expect(sets[0].value).toEqual({ ...record(), updatedAt: NOW_ISO })
@@ -328,5 +339,69 @@ test('T7f load-returns-unreadable-and-logs-when-home-empty', async () => {
   expect(logs[0].opts).toEqual({ to: 'transcript' })
   expect(of(calls, 'exists')).toHaveLength(0)
   expect(of(calls, 'read')).toHaveLength(0)
+  expect(of(calls, 'state.set')).toHaveLength(0)
+})
+
+test('C3.1 save-adds-a-new-issue-to-issue-ids', async () => {
+  const { $ } = fake({ issueIds: [7, 12] })
+  expect(await saveIssue($, record(15))).toBe(true)
+  expect(await issueIdsOf($)).toEqual([7, 12, 15])
+})
+
+test('C3.1 save-keeps-issue-ids-sorted', async () => {
+  const { $ } = fake({ issueIds: [7, 12] })
+  await saveIssue($, record(9))
+  expect(await issueIdsOf($)).toEqual([7, 9, 12])
+})
+
+test('C3.1 save-starts-issue-ids-when-unset', async () => {
+  const { $ } = fake()
+  await saveIssue($, record(15))
+  expect(await issueIdsOf($)).toEqual([15])
+})
+
+test('C3.1 parallel-saves-keep-both-ids', async () => {
+  const { $ } = fake({ issueIds: [7, 12], yieldOnWrite: true })
+  await Promise.all([saveIssue($, record(15, '/src/feat-15')), saveIssue($, record(16, '/src/feat-16'))])
+  expect(await issueIdsOf($)).toEqual([7, 12, 15, 16])
+})
+
+test('C3.1 stale-snapshot-gives-up-after-three-attempts', async () => {
+  const { $, calls } = fake({ issueIds: [7, 12] })
+  // Every get of one dispatch reads one moment: the version stays stale, so each compare-and-set is refused.
+  $.state.get = async () => ({ value: [7, 12], version: 1 })
+  let idSets = 0
+  $.state.set = async (ref: any) => {
+    if (ref.key !== 'issueIds') return { isSet: true, version: 1 }
+    if (++idSets > 10) throw new Error('unbounded retry')
+    return { isSet: false, version: 2 }
+  }
+  expect(await saveIssue($, record(15))).toBe(true)
+  expect(idSets).toBeLessThanOrEqual(3)
+  expect(runs(calls, 'mv')).toHaveLength(1)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
+test('C3.1 issue-ids-is-written-after-the-mirror', async () => {
+  const { $, calls } = fake({ issueIds: [7, 12] })
+  await saveIssue($, record(15))
+  const sets = of(calls, 'state.set')
+  const mirror = sets.findIndex((c) => c.ref.key === 'issues')
+  const ids = sets.findIndex((c) => c.ref.key === 'issueIds')
+  expect(sets[ids].ref).toEqual({ plugin: 'control-tower', key: 'issueIds' })
+  expect(mirror).toBeLessThan(ids)
+})
+
+test('C3.2 save-of-a-known-issue-leaves-issue-ids-unchanged', async () => {
+  const { $, calls } = fake({ issueIds: [7, 12] })
+  expect(await saveIssue($, record(7))).toBe(true)
+  expect(await issueIdsOf($)).toEqual([7, 12])
+  expect(of(calls, 'state.set').filter((c) => c.ref.key === 'issueIds')).toHaveLength(0)
+})
+
+test('C3.3 failed-mv-leaves-issue-ids-unchanged', async () => {
+  const { $, calls } = fake({ issueIds: [7, 12], mv: mvFails })
+  expect(await saveIssue($, record(15))).toBe(false)
+  expect(await issueIdsOf($)).toEqual([7, 12])
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
