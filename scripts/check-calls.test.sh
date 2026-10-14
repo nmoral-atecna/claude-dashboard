@@ -46,6 +46,18 @@ if ! "$check" "$mod_b" > /dev/null 2>&1; then
     fail T2b "\$.ui.toast + \$.fs.read should pass"
 fi
 
+make_mod "await \$.env.get('HOME')"
+mod_env="$mod"
+if ! "$check" "$mod_env" > /dev/null 2>&1; then
+    fail T2d "\$.env.get should pass"
+fi
+
+make_mod "await \$.session.cwd()"
+mod_session="$mod"
+if ! "$check" "$mod_session" > /dev/null 2>&1; then
+    fail T2e "\$.session.cwd should pass"
+fi
+
 make_mod "\$.ui.toast('a'); await \$.http.fetch({ url: 'https://x' } as any)"
 mod_c="$mod"
 if out_c="$("$check" "$mod_c" 2>&1)"; then

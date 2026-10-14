@@ -236,6 +236,28 @@ test('T6 every-process-run-has-short-timeout', async () => {
   }
 })
 
+test('T8a save-returns-true-on-success', async () => {
+  const { $ } = fake()
+  expect(await saveIssue($, record())).toBe(true)
+})
+
+test('T8b save-returns-false-and-logs-on-failure', async () => {
+  const failures = [
+    { git: gitFails },
+    { writeError: new Error('EACCES: permission denied') },
+    { mv: mvFails },
+    { gitError: new Error('timed out') },
+    { envError: new Error('env unavailable') },
+    { home: undefined },
+    { home: '' },
+  ]
+  for (const options of failures) {
+    const { $, calls } = fake(options)
+    expect(await saveIssue($, record())).toBe(false)
+    expect(of(calls, 'log')).toHaveLength(1)
+  }
+})
+
 test('T7a load-returns-record', async () => {
   const { $, calls } = fake({ files: { [`${DIR}/2.json`]: JSON.stringify(record()) } })
   expect(await loadIssue($, '/src/feat-2', 2)).toEqual(record())
@@ -250,7 +272,7 @@ test('T7b load-returns-null-when-missing', async () => {
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
-test('T7c load-logs-when-json-invalid', async () => {
+test('T7c load-returns-unreadable-and-logs-when-json-invalid', async () => {
   const { $, calls } = fake({ files: { [`${DIR}/2.json`]: '{not json' } })
   let parseMessage = ''
   try {
@@ -258,7 +280,7 @@ test('T7c load-logs-when-json-invalid', async () => {
   } catch (error: any) {
     parseMessage = error.message
   }
-  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  expect(await loadIssue($, '/src/feat-2', 2)).toBe('unreadable')
   const logs = of(calls, 'log')
   expect(logs).toHaveLength(1)
   expect(logs[0].text.startsWith('control-tower: read failed claude-dashboard/2: ')).toBe(true)
@@ -267,9 +289,9 @@ test('T7c load-logs-when-json-invalid', async () => {
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
-test('T7d load-logs-when-git-fails', async () => {
+test('T7d load-returns-unreadable-and-logs-when-git-fails', async () => {
   const { $, calls } = fake({ git: gitFails })
-  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  expect(await loadIssue($, '/src/feat-2', 2)).toBe('unreadable')
   const logs = of(calls, 'log')
   expect(logs).toHaveLength(1)
   expect(logs[0].text).toBe('control-tower: read failed /src/feat-2/2: fatal: not a git repository')
@@ -278,9 +300,16 @@ test('T7d load-logs-when-git-fails', async () => {
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
-test('T7e load-logs-when-home-unset', async () => {
+test('T7g load-returns-unreadable-and-logs-when-git-times-out', async () => {
+  const { $, calls } = fake({ gitError: new Error('timed out') })
+  expect(await loadIssue($, '/src/feat-2', 2)).toBe('unreadable')
+  expect(of(calls, 'log')).toHaveLength(1)
+  expect(of(calls, 'read')).toHaveLength(0)
+})
+
+test('T7e load-returns-unreadable-and-logs-when-home-unset', async () => {
   const { $, calls } = fake({ home: undefined })
-  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  expect(await loadIssue($, '/src/feat-2', 2)).toBe('unreadable')
   const logs = of(calls, 'log')
   expect(logs).toHaveLength(1)
   expect(logs[0].text).toBe('control-tower: read failed claude-dashboard/2: HOME is not set')
@@ -290,9 +319,9 @@ test('T7e load-logs-when-home-unset', async () => {
   expect(of(calls, 'state.set')).toHaveLength(0)
 })
 
-test('T7f load-logs-when-home-empty', async () => {
+test('T7f load-returns-unreadable-and-logs-when-home-empty', async () => {
   const { $, calls } = fake({ home: '' })
-  expect(await loadIssue($, '/src/feat-2', 2)).toBeNull()
+  expect(await loadIssue($, '/src/feat-2', 2)).toBe('unreadable')
   const logs = of(calls, 'log')
   expect(logs).toHaveLength(1)
   expect(logs[0].text).toBe('control-tower: read failed claude-dashboard/2: HOME is not set')
