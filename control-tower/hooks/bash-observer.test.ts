@@ -14,7 +14,8 @@ type EngineOpts = {
 }
 
 // Answers every $ call the Bash observer makes; the bottom tool.call returns the Bash result.
-// `removedWorktree` disappears once the tool ran: a `git worktree list` there then fails, like a real removal.
+// `removedWorktree` disappears once the tool ran: any process whose effective cwd (its `cwd`, else the
+// session cwd) is that directory then fails to start with ENOENT, like a real posix_spawn.
 function engine(on: any, opts: EngineOpts = {}): any[] {
   const { branch = 'feat/142-tva', files = {}, result = ok(), cwd = '/src/repo', toplevel = '/src/repo', removedWorktree } = opts
   const calls: any[] = []
@@ -26,8 +27,8 @@ function engine(on: any, opts: EngineOpts = {}): any[] {
   on('process.run', async ($b: any, e: any) => {
     calls.push({ kind: 'run', e })
     const [cmd, arg, target] = e.argv
-    if (arg === 'worktree' && state.removed && e.init?.cwd === removedWorktree) {
-      return { value: { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository\n' } }
+    if (state.removed && (e.init?.cwd ?? cwd) === removedWorktree) {
+      throw Object.assign(new Error(`posix_spawn '${cmd}' failed: ENOENT`), { code: 'ENOENT' })
     }
     if (cmd === 'mv') {
       files[target] = files[arg]
@@ -433,6 +434,7 @@ test('C4.5 session-inside-the-removed-worktree-still-saves-termine', async ($: a
   const calls = engine(on, { ...removeOpts(files), cwd: '/w/ct-99' })
   await bash($, 'cd /main && git worktree remove /w/ct-99')
   expect(JSON.parse(files[FILE99]).step).toBe('termine')
+  expect(Object.keys(files)).toEqual([FILE99])
   expect(of(calls, 'log')).toHaveLength(0)
 })
 
