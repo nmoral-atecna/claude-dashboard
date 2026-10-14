@@ -1,6 +1,6 @@
 import type { Register } from 'claude-code'
 import { autoStep, type AutoSignals } from './auto-step'
-import { declareDashCommand, registerDashboard } from './dashboard-pane'
+import { declareDashCommand, registerDashboard, resumeDashboard } from './dashboard-pane'
 import { resolveIssue } from './issue-resolver'
 import { loadIssue, reloadIssues, saveIssue } from './issue-store'
 import { applyStep, invalidRequest, NOTE_MAX_LENGTH, REQUESTED_STEPS, STEPS } from './issue-step'
@@ -56,6 +56,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.tool.register(SET_ISSUE_STEP)
     await declareDashCommand($)
+    await resumeDashboard($)
     return next(e)
   })
 
