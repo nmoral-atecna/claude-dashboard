@@ -62,7 +62,9 @@ function engine(on: any, opts: EngineOpts = {}): any[] {
 }
 
 const ok = (record: any = {}) => ({ result: { stdout: '', stderr: '', interrupted: false, ...record } })
-const failed = () => ({ isError: true, result: 'tests failed' })
+// Core's real shape for a command that ran and exited non-zero: the text starts with its exit code.
+const failed = (code = 1) => errored(`Exit code ${code}\ntests failed`)
+const errored = (text: string) => ({ isError: true, result: `Error: ${text}`, text })
 const of = (calls: any[], kind: string) => calls.filter((c) => c.kind === kind)
 
 function record(step: string, extra: any = {}): any {
@@ -143,6 +145,33 @@ test('C5.3 interrupted-command-is-ignored', async ($: any, on: any) => {
   expect(of(calls, 'run')).toHaveLength(0)
 })
 
+test('C5.10 command-killed-by-bash-timeout-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: errored('Exit code 143\nCommand timed out after 2s') })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.11 command-denied-by-permission-rule-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: errored('Permission to use Bash with command make test has been denied.') })
+  await bash($, 'make test')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.11 command-rejected-before-running-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: errored("The user doesn't want to proceed with this tool use. The tool use was rejected.") })
+  await bash($, 'make test')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
 test('C5.4 untracked-branch-changes-nothing', async ($: any, on: any) => {
   const files = disk('vert')
   const before = files[FILE]
@@ -217,6 +246,24 @@ test('C6.3 invalid-pattern-disables-tests-rule-and-logs', { options: { testPatte
   expect(logs).toHaveLength(1)
   expect(logs[0].e.text.startsWith('control-tower: invalid testPattern (: ')).toBe(true)
   expect(logs[0].e.to).toBe('transcript')
+})
+
+test('C6.4 default-pattern-ignores-cat-phpunit-xml', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: failed() })
+  await bash($, 'cat phpunit.xml')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C6.5 default-pattern-ignores-ls-vendor-bin-phpunit', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'ls vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
 })
 
 test('C3.1 gh-pr-create-at-doc-moves-to-mr', async ($: any, on: any) => {
@@ -312,7 +359,7 @@ test('C4.2 removing-an-untracked-worktree-changes-nothing', async ($: any, on: a
 test('C4.3 failed-worktree-remove-stays', async ($: any, on: any) => {
   const files = disk99('mr')
   const before = files[FILE99]
-  const calls = engine(on, removeOpts(files, failed()))
+  const calls = engine(on, removeOpts(files, failed(128)))
   await bash($, 'git worktree remove /w/ct-99')
   expect(files[FILE99]).toBe(before)
   expect(of(calls, 'write')).toHaveLength(0)
