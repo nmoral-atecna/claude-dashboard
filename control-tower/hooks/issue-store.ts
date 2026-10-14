@@ -10,11 +10,14 @@ export async function saveIssue($: any, record: IssueRecord): Promise<boolean> {
     const tmp = `${path}.tmp-${crypto.randomUUID()}`
     const saved = { ...record, updatedAt: new Date(await $.clock.now()).toISOString() }
 
+    // The store dir exists (tmp was just written there), unlike the session cwd, which may be a removed worktree.
+    const store = { cwd: path.slice(0, path.lastIndexOf('/')) }
+
     await $.fs.write(tmp, JSON.stringify(saved, null, 2))
-    const mv = await run($, ['mv', tmp, path])
+    const mv = await run($, ['mv', tmp, path], store)
     if (mv.exitCode !== 0) {
       logFailure($, 'save', label, mv.stderr)
-      await run($, ['rm', '-f', tmp])
+      await run($, ['rm', '-f', tmp], store)
       return false
     }
     await $.state.set({ plugin: 'control-tower', key: 'issues', id: String(record.issue) }, saved)
