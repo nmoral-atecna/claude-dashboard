@@ -124,7 +124,7 @@ test('C2.1 pane-renders-the-issue-line', async ($: any, on: any) => {
     props: paneProps(100),
   })
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
-  expect(texts).toEqual(['#12  TVA  vert  green  1h'])
+  expect(texts).toEqual(['ISSUE  TITLE  STEP  NOTE   AGE', '#12    TVA    vert  green  1h'])
   await ui.unmount()
 })
 

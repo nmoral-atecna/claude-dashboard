@@ -2,12 +2,13 @@ import { test, expect } from 'claude-code/testing'
 import type { HistoryEntry, IssueRecord, Step } from 'claude-code'
 import {
   EMPTY_MESSAGE,
+  NO_NOTE,
   composeRows,
   formatAge,
   orphanIssues,
   renderDashboard,
-  renderRow,
   toRow,
+  type DashboardRow,
 } from './dashboard'
 
 const NOW = Date.parse('2026-10-14T12:00:00Z')
@@ -199,19 +200,46 @@ test('C5.4 git-failure-yields-no-orphan', async () => {
   expect(orphanIssues(null, [12], issues).size).toBe(0)
 })
 
-// C7.1 — truncation to fit the body columns
+// C8 — header line and left-aligned columns
 
-test('C7.1 row-fits-in-body-columns', async () => {
+function row(partial: Partial<DashboardRow> & { issue: number }): DashboardRow {
+  return {
+    issue: partial.issue,
+    label: partial.label ?? '',
+    step: partial.step ?? 'vert',
+    marks: partial.marks ?? [],
+    note: partial.note ?? NO_NOTE,
+    ageMs: partial.ageMs ?? 0,
+    age: partial.age ?? '1h',
+  }
+}
+
+test('C8.1 header-and-aligned-columns', async () => {
+  const rows = [
+    row({ issue: 9, label: 'remises', step: 'refacto', marks: ['blocked'], note: 'waiting API', age: '2h' }),
+    row({ issue: 7, label: 'orpheline', step: 'spec', marks: ['orphan'], note: NO_NOTE, age: '1h' }),
+    row({ issue: 12, label: 'TVA', step: 'vert', note: 'green', age: '1h' }),
+  ]
+  expect(renderDashboard(rows, 100)).toEqual([
+    'ISSUE  TITLE      STEP             NOTE         AGE',
+    '#9     remises    refacto blocked  waiting API  2h',
+    '#7     orpheline  spec orphan      —            1h',
+    '#12    TVA        vert             green        1h',
+  ])
+})
+
+// C7.1 / C8.2 — truncation of the flexible columns, columns still aligned
+
+test('C8.2 aligned-truncation-fits-body-columns', async () => {
   const title = 'a'.repeat(80)
   const note = 'b'.repeat(150)
-  const row = toRow(
-    record({ issue: 12, title, step: 'vert', history: [h('vert', at('11:00'), note)] }),
-    false,
-    NOW,
-  )
-  const line = renderRow(row, 100)
-  expect(line.length).toBeLessThanOrEqual(100)
-  expect(line).toContain('…')
-  expect(line).not.toContain(title)
-  expect(line).not.toContain(note)
+  const lines = renderDashboard([row({ issue: 12, label: title, step: 'vert', note, age: '1h' })], 100)
+  expect(lines).toHaveLength(2)
+  expect(lines[0].startsWith('ISSUE')).toBe(true)
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(100)
+  expect(lines[1]).toContain('…')
+  expect(lines[1]).not.toContain(title)
+  expect(lines[1]).not.toContain(note)
+  // Columns stay aligned: the data row's first columns line up with the header's.
+  expect(lines[1].indexOf('…')).toBeGreaterThan('ISSUE  '.length)
 })
