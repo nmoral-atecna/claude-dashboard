@@ -83,9 +83,10 @@ export async function reloadIssues($: any, cwd: string): Promise<void> {
 }
 
 // Compare-and-set on the version: a concurrent save in the same session must not drop an id.
+// Bounded because a dispatch may keep reading the same stale version; the next SessionStart reload catches up.
 async function addIssueId($: any, issue: number): Promise<void> {
   const ref = { plugin: 'control-tower', key: 'issueIds' }
-  for (;;) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     const current = await $.state.get(ref)
     const ids: number[] = current.value ?? []
     if (ids.includes(issue)) return
