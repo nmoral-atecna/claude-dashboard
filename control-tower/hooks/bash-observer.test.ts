@@ -114,6 +114,51 @@ test('C2.1 recognized-tests-fail-beyond-vert-goes-back', async ($: any, on: any)
   expect(saved.history).toEqual([{ step: 'tests-valides', at: NOW_ISO, source: 'auto', note: 'make test' }])
 })
 
+test('C1.2 pytest-passing-too-early-changes-nothing', async ($: any, on: any) => {
+  const files = disk('tests-ecrits')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'pytest')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C1.3 pest-passing-beyond-vert-changes-nothing', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'pest')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C2.2 tests-failing-before-vert-changes-nothing', async ($: any, on: any) => {
+  const files = disk('tests-ecrits')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: failed() })
+  await bash($, 'make test')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C2.3 phpunit-exit-2-at-vert-goes-back', async ($: any, on: any) => {
+  const files = disk('vert')
+  engine(on, { files, result: failed(2) })
+  await bash($, 'phpunit')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('tests-valides')
+  expect(saved.history).toEqual([{ step: 'tests-valides', at: NOW_ISO, source: 'auto', note: 'phpunit' }])
+})
+
+test('C2.4 tests-failing-on-termine-changes-nothing', async ($: any, on: any) => {
+  const files = disk('termine')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: failed() })
+  await bash($, 'phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
 test('C5.1 cd-prefix-resolves-from-that-path', async ($: any, on: any) => {
   const files = disk('tests-valides')
   const calls = engine(on, { files, cwd: '/main/repo' })
@@ -372,6 +417,23 @@ test('C4.3 failed-worktree-remove-stays', async ($: any, on: any) => {
   await bash($, 'git worktree remove /w/ct-99')
   expect(files[FILE99]).toBe(before)
   expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C4.4 worktree-remove-only-mentioned-is-not-recognized', async ($: any, on: any) => {
+  const files = disk99('mr')
+  const before = files[FILE99]
+  const calls = engine(on, removeOpts(files))
+  await bash($, 'git worktree list && echo git worktree remove /w/ct-99')
+  expect(files[FILE99]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C4.5 session-inside-the-removed-worktree-still-saves-termine', async ($: any, on: any) => {
+  const files = disk99('mr')
+  const calls = engine(on, { ...removeOpts(files), cwd: '/w/ct-99' })
+  await bash($, 'cd /main && git worktree remove /w/ct-99')
+  expect(JSON.parse(files[FILE99]).step).toBe('termine')
+  expect(of(calls, 'log')).toHaveLength(0)
 })
 
 test('C7.1 unrecognized-command-touches-nothing', async ($: any, on: any) => {
