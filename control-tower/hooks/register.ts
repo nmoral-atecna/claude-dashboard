@@ -89,6 +89,7 @@ export const register: Register = (on, options) => {
 async function observeBash($: any, command: string, result: any, options: any, removal: any): Promise<void> {
   const bash = result?.result
   if (bash?.backgroundTaskId != null || bash?.interrupted === true) return
+  if (result?.isError === true && !ranToCompletion(result)) return
   const succeeded = result?.isError !== true
 
   // Worktree removal was pre-resolved before next(e): the worktree no longer exists.
@@ -115,6 +116,13 @@ async function observeBash($: any, command: string, result: any, options: any, r
   const target = autoStep(current.step, signals)
   if (target === null) return
   await saveAuto($, io, current, target, command)
+}
+
+// A command that ran and exited non-zero reads `Exit code N`; a denied or rejected one never ran, and a Bash
+// timeout (143) cut it short: neither says anything about the tests.
+function ranToCompletion(result: any): boolean {
+  const text = String(result.text ?? result.result ?? '')
+  return /^(Error: )?Exit code \d+/.test(text) && !text.includes('Command timed out')
 }
 
 /** Resolves and loads the issue of `path` before its worktree is removed; null when it is not tracked. */
