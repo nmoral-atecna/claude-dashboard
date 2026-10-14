@@ -366,6 +366,22 @@ test('C3.1 parallel-saves-keep-both-ids', async () => {
   expect(await issueIdsOf($)).toEqual([7, 12, 15, 16])
 })
 
+test('C3.1 stale-snapshot-gives-up-after-three-attempts', async () => {
+  const { $, calls } = fake({ issueIds: [7, 12] })
+  // Every get of one dispatch reads one moment: the version stays stale, so each compare-and-set is refused.
+  $.state.get = async () => ({ value: [7, 12], version: 1 })
+  let idSets = 0
+  $.state.set = async (ref: any) => {
+    if (ref.key !== 'issueIds') return { isSet: true, version: 1 }
+    if (++idSets > 10) throw new Error('unbounded retry')
+    return { isSet: false, version: 2 }
+  }
+  expect(await saveIssue($, record(15))).toBe(true)
+  expect(idSets).toBeLessThanOrEqual(3)
+  expect(runs(calls, 'mv')).toHaveLength(1)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
 test('C3.1 issue-ids-is-written-after-the-mirror', async () => {
   const { $, calls } = fake({ issueIds: [7, 12] })
   await saveIssue($, record(15))
