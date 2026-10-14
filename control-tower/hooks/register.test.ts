@@ -9,8 +9,8 @@ const NOW_ISO = '2026-10-13T12:00:00.000Z'
 const FILE = '/home/t/.claude/control-tower/repo/142.json'
 
 // Answers every $ call the plugin makes; the test's hooks are the bottom of the chain.
-// `files` is the in-memory disk, mutated by fs.write, mv and rm.
-function engine(on: any, branch: string, files: Record<string, string> = {}, mvFails = false): any[] {
+// `files` is the in-memory disk, mutated by fs.write, mv and rm; `failing` names a git/mv subcommand that fails.
+function engine(on: any, branch: string, files: Record<string, string> = {}, failing = ''): any[] {
   const calls: any[] = []
   on('session.start', async ($b: any, e: any) => {
     calls.push({ kind: 'session.start', e })
@@ -24,8 +24,9 @@ function engine(on: any, branch: string, files: Record<string, string> = {}, mvF
   on('process.run', async ($b: any, e: any) => {
     calls.push({ kind: 'run', e })
     const [cmd, arg, target] = e.argv
+    if (failing === arg) return { value: { exitCode: 128, stdout: '', stderr: 'fatal: git failed\n' } }
     if (cmd === 'mv') {
-      if (mvFails) return { value: { exitCode: 1, stdout: '', stderr: 'mv: cannot move\n' } }
+      if (failing === 'mv') return { value: { exitCode: 1, stdout: '', stderr: 'mv: cannot move\n' } }
       files[target] = files[arg]
       delete files[arg]
     }
@@ -217,9 +218,28 @@ test('C4.2 missing-title-is-set', async ($: any, on: any) => {
 test('C7.1 failed-save-answers-failure', async ($: any, on: any) => {
   const files = disk('spec')
   const before = files[FILE]
-  engine(on, 'feat/142-tva', files, true)
+  engine(on, 'feat/142-tva', files, 'mv')
   expect(await call($, { step: 'tests-ecrits' })).toBe('Failed to save issue 142; see the transcript.')
   expect(files[FILE]).toBe(before)
+})
+
+const READ_FAILED = 'Failed to read issue 142; see the transcript.'
+
+test('C7.2 invalid-json-answers-read-failure-and-keeps-file', async ($: any, on: any) => {
+  const files = { [FILE]: '{not json' }
+  const calls = engine(on, 'feat/142-tva', files)
+  expect(await call($, { step: 'spec' })).toBe(READ_FAILED)
+  expect(files).toEqual({ [FILE]: '{not json' })
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C7.2 failed-git-answers-read-failure-and-keeps-file', async ($: any, on: any) => {
+  const files = disk('vert', { title: 'Calcul TVA' })
+  const before = files[FILE]
+  const calls = engine(on, 'feat/142-tva', files, 'worktree')
+  expect(await call($, { step: 'spec' })).toBe(READ_FAILED)
+  expect(files).toEqual({ [FILE]: before })
+  expect(of(calls, 'write')).toHaveLength(0)
 })
 
 const INVALID_DONE = 'Invalid step `done`. Expected one of: `spec`, `tests-ecrits`, `tests-valides`, `vert`, '
