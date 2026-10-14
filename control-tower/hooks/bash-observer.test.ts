@@ -201,6 +201,54 @@ test('C6.3 invalid-pattern-disables-tests-rule-and-logs', { options: { testPatte
   expect(logs[0].e.to).toBe('transcript')
 })
 
+test('C3.1 gh-pr-create-at-doc-moves-to-mr', async ($: any, on: any) => {
+  const files = disk('doc')
+  engine(on, { files })
+  await bash($, 'gh pr create --fill')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('mr')
+  expect(saved.history).toEqual([{ step: 'mr', at: NOW_ISO, source: 'auto', note: 'gh pr create --fill' }])
+})
+
+test('C3.2 glab-mr-create-jumps-from-tests-valides-to-mr', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  engine(on, { files })
+  await bash($, 'glab mr create --yes')
+  expect(JSON.parse(files[FILE]).step).toBe('mr')
+})
+
+test('C3.3 failed-pr-create-stays', async ($: any, on: any) => {
+  const files = disk('doc')
+  const before = files[FILE]
+  engine(on, { files, result: failed() })
+  await bash($, 'gh pr create')
+  expect(files[FILE]).toBe(before)
+})
+
+test('C3.4 pr-create-at-ci-does-not-go-back', async ($: any, on: any) => {
+  const files = disk('ci')
+  const before = files[FILE]
+  engine(on, { files })
+  await bash($, 'gh pr create')
+  expect(files[FILE]).toBe(before)
+})
+
+test('C3 neutralized-gh-still-matches-the-text', async ($: any, on: any) => {
+  const files = disk('doc')
+  engine(on, { files })
+  await bash($, 'gh() { :; }; gh pr create --fill')
+  expect(JSON.parse(files[FILE]).step).toBe('mr')
+})
+
+test('C5.9 most-advanced-rule-wins-pr-over-tests', async ($: any, on: any) => {
+  const files = disk('doc')
+  engine(on, { files })
+  await bash($, 'make test && gh pr create')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('mr')
+  expect(saved.history).toEqual([{ step: 'mr', at: NOW_ISO, source: 'auto', note: 'make test && gh pr create' }])
+})
+
 test('C7.1 unrecognized-command-touches-nothing', async ($: any, on: any) => {
   const files = disk('tests-valides')
   const before = files[FILE]
