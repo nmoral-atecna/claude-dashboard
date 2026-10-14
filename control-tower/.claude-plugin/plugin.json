@@ -12,6 +12,12 @@
       "title": "Branch pattern",
       "description": "Regex matched against the branch name; capture group 1 is the issue number",
       "default": "^(?:feat|fix|chore)/(\\d+)-"
+    },
+    "testPattern": {
+      "type": "string",
+      "title": "Test pattern",
+      "description": "Regex searched in a Bash command to recognize a test run",
+      "default": "(^|[;&|]\\s*)(docker compose exec \\S+ )?(\\S*/)?(phpunit|pest|pytest)(\\s|$)|(^|[;&|]\\s*)make test\\b"
     }
   }
 }

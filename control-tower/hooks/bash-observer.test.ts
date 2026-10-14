@@ -1,0 +1,450 @@
+import { test, expect } from 'claude-code/testing'
+
+const NOW = 1791892800000
+const NOW_ISO = '2026-10-13T12:00:00.000Z'
+const FILE = '/home/t/.claude/control-tower/repo/142.json'
+
+type EngineOpts = {
+  branch?: string
+  files?: Record<string, string>
+  result?: any
+  cwd?: string
+  toplevel?: string
+  removedWorktree?: string
+}
+
+// Answers every $ call the Bash observer makes; the bottom tool.call returns the Bash result.
+// `removedWorktree` disappears once the tool ran: any process whose effective cwd (its `cwd`, else the
+// session cwd) is that directory then fails to start with ENOENT, like a real posix_spawn.
+function engine(on: any, opts: EngineOpts = {}): any[] {
+  const { branch = 'feat/142-tva', files = {}, result = ok(), cwd = '/src/repo', toplevel = '/src/repo', removedWorktree } = opts
+  const calls: any[] = []
+  const state = { removed: false }
+  on('session.cwd', async () => {
+    calls.push({ kind: 'session.cwd' })
+    return { value: cwd }
+  })
+  on('process.run', async ($b: any, e: any) => {
+    calls.push({ kind: 'run', e })
+    const [cmd, arg, target] = e.argv
+    if (state.removed && (e.init?.cwd ?? cwd) === removedWorktree) {
+      throw Object.assign(new Error(`posix_spawn '${cmd}' failed: ENOENT`), { code: 'ENOENT' })
+    }
+    if (cmd === 'mv') {
+      files[target] = files[arg]
+      delete files[arg]
+    }
+    if (cmd === 'rm') delete files[target]
+    const stdout = arg === 'branch' ? `${branch}\n`
+      : arg === 'rev-parse' ? `${toplevel}\n`
+      : arg === 'worktree' ? 'worktree /src/repo\n'
+      : '/src/repo\n'
+    return { value: { exitCode: 0, stdout, stderr: '' } }
+  })
+  on('env.get', async ($b: any, e: any) => ({ value: e.name === 'HOME' ? '/home/t' : undefined }))
+  on('clock.now', async () => ({ value: NOW }))
+  on('fs.exists', async ($b: any, e: any) => ({ value: e.path in files }))
+  on('fs.read', async ($b: any, e: any) => ({ value: files[e.path] }))
+  on('fs.write', async ($b: any, e: any) => {
+    calls.push({ kind: 'write', e })
+    files[e.path] = e.text
+    return { value: undefined }
+  })
+  on('ui.log', async ($b: any, e: any) => {
+    calls.push({ kind: 'log', e })
+    return { value: undefined }
+  })
+  on('tool.call', async ($b: any, e: any) => {
+    calls.push({ kind: 'core tool.call', e })
+    state.removed = true
+    return result
+  })
+  return calls
+}
+
+const ok = (record: any = {}) => ({ result: { stdout: '', stderr: '', interrupted: false, ...record } })
+// Core's real shape for a command that ran and exited non-zero: the text starts with its exit code.
+const failed = (code = 1) => errored(`Exit code ${code}\ntests failed`)
+const errored = (text: string) => ({ isError: true, result: `Error: ${text}`, text })
+const of = (calls: any[], kind: string) => calls.filter((c) => c.kind === kind)
+
+function record(step: string, extra: any = {}): any {
+  return {
+    issue: 142,
+    title: null,
+    step,
+    blockedReason: null,
+    branch: 'feat/142-tva',
+    worktree: '/src/repo',
+    history: [],
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    ...extra,
+  }
+}
+const disk = (step: string, extra: any = {}) => ({ [FILE]: JSON.stringify(record(step, extra)) })
+const bash = ($: any, command: string) => $.tool.call({ tool: 'Bash', command })
+
+test('C1.1 recognized-tests-pass-at-tests-valides-moves-to-vert', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  engine(on, { files })
+  await bash($, 'vendor/bin/phpunit')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('vert')
+  expect(saved.history).toEqual([{ step: 'vert', at: NOW_ISO, source: 'auto', note: 'vendor/bin/phpunit' }])
+  expect(saved.blockedReason).toBeNull()
+})
+
+test('C1.4 note-is-truncated-to-200-characters', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  engine(on, { files })
+  const command = 'phpunit ' + 'x'.repeat(242)
+  expect(command.length).toBe(250)
+  await bash($, command)
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('vert')
+  expect(saved.history[0].note).toBe(command.slice(0, 200))
+  expect(saved.history[0].note.length).toBe(200)
+})
+
+test('C2.1 recognized-tests-fail-beyond-vert-goes-back', async ($: any, on: any) => {
+  const files = disk('refacto')
+  engine(on, { files, result: failed() })
+  await bash($, 'make test')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('tests-valides')
+  expect(saved.history).toEqual([{ step: 'tests-valides', at: NOW_ISO, source: 'auto', note: 'make test' }])
+})
+
+test('C1.2 pytest-passing-too-early-changes-nothing', async ($: any, on: any) => {
+  const files = disk('tests-ecrits')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'pytest')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C1.3 pest-passing-beyond-vert-changes-nothing', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'pest')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C2.2 tests-failing-before-vert-changes-nothing', async ($: any, on: any) => {
+  const files = disk('tests-ecrits')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: failed() })
+  await bash($, 'make test')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C2.3 phpunit-exit-2-at-vert-goes-back', async ($: any, on: any) => {
+  const files = disk('vert')
+  engine(on, { files, result: failed(2) })
+  await bash($, 'phpunit')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('tests-valides')
+  expect(saved.history).toEqual([{ step: 'tests-valides', at: NOW_ISO, source: 'auto', note: 'phpunit' }])
+})
+
+test('C2.4 tests-failing-on-termine-changes-nothing', async ($: any, on: any) => {
+  const files = disk('termine')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: failed() })
+  await bash($, 'phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.1 cd-prefix-resolves-from-that-path', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const calls = engine(on, { files, cwd: '/main/repo' })
+  await bash($, 'cd /w/ct-99 && make test')
+  expect(JSON.parse(files[FILE]).step).toBe('vert')
+  const resolveCwds = of(calls, 'run')
+    .filter((c) => ['branch', 'rev-parse'].includes(c.e.argv[1]))
+    .map((c) => c.e.init.cwd)
+  expect(resolveCwds).toEqual(['/w/ct-99', '/w/ct-99'])
+  expect(of(calls, 'session.cwd')).toHaveLength(0)
+})
+
+test('C5.2 background-command-is-ignored', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: ok({ backgroundTaskId: 'bg-1' }) })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C5.3 interrupted-command-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: ok({ interrupted: true }) })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C5.10 command-killed-by-bash-timeout-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: errored('Exit code 143\nCommand timed out after 2s') })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.11 command-denied-by-permission-rule-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: errored('Permission to use Bash with command make test has been denied.') })
+  await bash($, 'make test')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.11 command-rejected-before-running-is-ignored', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: errored("The user doesn't want to proceed with this tool use. The tool use was rejected.") })
+  await bash($, 'make test')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C5.4 untracked-branch-changes-nothing', async ($: any, on: any) => {
+  const files = disk('vert')
+  const before = files[FILE]
+  const calls = engine(on, { branch: 'main', files, result: failed() })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
+test('C5.5 missing-issue-file-is-not-created', async ($: any, on: any) => {
+  const files: Record<string, string> = {}
+  const calls = engine(on, { files })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files).toEqual({})
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
+test('C5.6 unreadable-issue-only-logs-read-failed', async ($: any, on: any) => {
+  const files = { [FILE]: '{oops' }
+  const calls = engine(on, { files })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files).toEqual({ [FILE]: '{oops' })
+  expect(of(calls, 'write')).toHaveLength(0)
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].e.text.includes('read failed')).toBe(true)
+})
+
+test('C5.7 blocked-issue-advances-and-keeps-reason', async ($: any, on: any) => {
+  const files = disk('tests-valides', { blockedReason: 'arrondi TVA' })
+  engine(on, { files })
+  await bash($, 'vendor/bin/phpunit')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('vert')
+  expect(saved.blockedReason).toBe('arrondi TVA')
+})
+
+test('C5.8 bash-result-is-returned-unchanged', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const result = ok()
+  engine(on, { files, result })
+  expect(await bash($, 'vendor/bin/phpunit')).toEqual(result)
+})
+
+test('C6.1 docker-compose-exec-phpunit-is-recognized', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  engine(on, { files })
+  await bash($, 'docker compose exec app vendor/bin/phpunit')
+  expect(JSON.parse(files[FILE]).step).toBe('vert')
+})
+
+test('C6.2 custom-pattern-matches-only-itself', { options: { testPattern: '\\bnpm test\\b' } }, async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  engine(on, { files })
+  await bash($, 'npm test')
+  expect(JSON.parse(files[FILE]).step).toBe('vert')
+  await bash($, 'vendor/bin/phpunit')
+  expect(JSON.parse(files[FILE]).step).toBe('vert')
+})
+
+test('C6.3 invalid-pattern-disables-tests-rule-and-logs', { options: { testPattern: '(' } }, async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'run')).toHaveLength(0)
+  const logs = of(calls, 'log')
+  expect(logs).toHaveLength(1)
+  expect(logs[0].e.text.startsWith('control-tower: invalid testPattern (: ')).toBe(true)
+  expect(logs[0].e.to).toBe('transcript')
+})
+
+test('C6.4 default-pattern-ignores-cat-phpunit-xml', async ($: any, on: any) => {
+  const files = disk('refacto')
+  const before = files[FILE]
+  const calls = engine(on, { files, result: failed() })
+  await bash($, 'cat phpunit.xml')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C6.5 default-pattern-ignores-ls-vendor-bin-phpunit', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'ls vendor/bin/phpunit')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C3.1 gh-pr-create-at-doc-moves-to-mr', async ($: any, on: any) => {
+  const files = disk('doc')
+  engine(on, { files })
+  await bash($, 'gh pr create --fill')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('mr')
+  expect(saved.history).toEqual([{ step: 'mr', at: NOW_ISO, source: 'auto', note: 'gh pr create --fill' }])
+})
+
+test('C3.2 glab-mr-create-jumps-from-tests-valides-to-mr', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  engine(on, { files })
+  await bash($, 'glab mr create --yes')
+  expect(JSON.parse(files[FILE]).step).toBe('mr')
+})
+
+test('C3.3 failed-pr-create-stays', async ($: any, on: any) => {
+  const files = disk('doc')
+  const before = files[FILE]
+  engine(on, { files, result: failed() })
+  await bash($, 'gh pr create')
+  expect(files[FILE]).toBe(before)
+})
+
+test('C3.4 pr-create-at-ci-does-not-go-back', async ($: any, on: any) => {
+  const files = disk('ci')
+  const before = files[FILE]
+  engine(on, { files })
+  await bash($, 'gh pr create')
+  expect(files[FILE]).toBe(before)
+})
+
+test('C3.5 pr-create-inside-grep-argument-is-not-recognized', async ($: any, on: any) => {
+  const files = disk('doc')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'grep -n "gh pr create" NOTES.md')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
+test('C3 neutralized-gh-still-matches-the-text', async ($: any, on: any) => {
+  const files = disk('doc')
+  engine(on, { files })
+  await bash($, 'gh() { :; }; gh pr create --fill')
+  expect(JSON.parse(files[FILE]).step).toBe('mr')
+})
+
+test('C5.9 most-advanced-rule-wins-pr-over-tests', async ($: any, on: any) => {
+  const files = disk('doc')
+  engine(on, { files })
+  await bash($, 'make test && gh pr create')
+  const saved = JSON.parse(files[FILE])
+  expect(saved.step).toBe('mr')
+  expect(saved.history).toEqual([{ step: 'mr', at: NOW_ISO, source: 'auto', note: 'make test && gh pr create' }])
+})
+
+const FILE99 = '/home/t/.claude/control-tower/repo/99.json'
+const record99 = (step: string, extra: any = {}) => ({
+  issue: 99,
+  title: null,
+  step,
+  blockedReason: null,
+  branch: 'feat/99-x',
+  worktree: '/w/ct-99',
+  history: [],
+  updatedAt: '2026-10-01T00:00:00.000Z',
+  ...extra,
+})
+const disk99 = (step: string) => ({ [FILE99]: JSON.stringify(record99(step)) })
+const removeOpts = (files: Record<string, string>, result?: any) => ({
+  branch: 'feat/99-x',
+  files,
+  result,
+  cwd: '/src/repo',
+  toplevel: '/w/ct-99',
+  removedWorktree: '/w/ct-99',
+})
+
+test('C4.1 worktree-remove-moves-the-removed-worktree-issue-to-termine', async ($: any, on: any) => {
+  const files = disk99('mr')
+  engine(on, removeOpts(files))
+  await bash($, 'git worktree remove /w/ct-99')
+  const saved = JSON.parse(files[FILE99])
+  expect(saved.step).toBe('termine')
+  expect(saved.history).toEqual([
+    { step: 'termine', at: NOW_ISO, source: 'auto', note: 'git worktree remove /w/ct-99' },
+  ])
+})
+
+test('C4.2 removing-an-untracked-worktree-changes-nothing', async ($: any, on: any) => {
+  const files: Record<string, string> = {}
+  const calls = engine(on, { branch: 'main', files, cwd: '/src/repo', toplevel: '/w/autre', removedWorktree: '/w/autre' })
+  await bash($, 'git worktree remove /w/autre')
+  expect(files).toEqual({})
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
+test('C4.3 failed-worktree-remove-stays', async ($: any, on: any) => {
+  const files = disk99('mr')
+  const before = files[FILE99]
+  const calls = engine(on, removeOpts(files, failed(128)))
+  await bash($, 'git worktree remove /w/ct-99')
+  expect(files[FILE99]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C4.4 worktree-remove-only-mentioned-is-not-recognized', async ($: any, on: any) => {
+  const files = disk99('mr')
+  const before = files[FILE99]
+  const calls = engine(on, removeOpts(files))
+  await bash($, 'git worktree list && echo git worktree remove /w/ct-99')
+  expect(files[FILE99]).toBe(before)
+  expect(of(calls, 'write')).toHaveLength(0)
+})
+
+test('C4.5 session-inside-the-removed-worktree-still-saves-termine', async ($: any, on: any) => {
+  const files = disk99('mr')
+  const calls = engine(on, { ...removeOpts(files), cwd: '/w/ct-99' })
+  await bash($, 'cd /main && git worktree remove /w/ct-99')
+  expect(JSON.parse(files[FILE99]).step).toBe('termine')
+  expect(Object.keys(files)).toEqual([FILE99])
+  expect(of(calls, 'log')).toHaveLength(0)
+})
+
+test('C7.1 unrecognized-command-touches-nothing', async ($: any, on: any) => {
+  const files = disk('tests-valides')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'ls -la')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+  expect(of(calls, 'write')).toHaveLength(0)
+  expect(of(calls, 'log')).toHaveLength(0)
+})
