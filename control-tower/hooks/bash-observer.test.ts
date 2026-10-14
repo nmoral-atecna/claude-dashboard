@@ -298,6 +298,15 @@ test('C3.4 pr-create-at-ci-does-not-go-back', async ($: any, on: any) => {
   expect(files[FILE]).toBe(before)
 })
 
+test('C3.5 pr-create-inside-grep-argument-is-not-recognized', async ($: any, on: any) => {
+  const files = disk('doc')
+  const before = files[FILE]
+  const calls = engine(on, { files })
+  await bash($, 'grep -n "gh pr create" NOTES.md')
+  expect(files[FILE]).toBe(before)
+  expect(of(calls, 'run')).toHaveLength(0)
+})
+
 test('C3 neutralized-gh-still-matches-the-text', async ($: any, on: any) => {
   const files = disk('doc')
   engine(on, { files })
