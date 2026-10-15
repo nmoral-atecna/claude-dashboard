@@ -179,12 +179,12 @@ test('C6.4 closing-with-dash-stops-git-and-disk', async ($: any, on: any) => {
   expect(counts.fsList).toBe(frozen.fsList)
 })
 
-// C6.5 — a ui.close on the pane stops the tick (the person's Escape path)
-// The kit exposes no way to raise an engine/person-origin ui.close; the pane's close is driven through the
-// toggle, which raises ui.close to the dashboard's origin-agnostic close hook — the same hook the person's
-// Escape reaches in a real session. What this asserts over C6.4 is the stop alone, with no command output.
+// C6.5 — closing the pane stops the tick, through the origin-agnostic ui.close hook (dashboard-pane.tsx)
+// This does NOT exercise the `person` origin: the test kit's `$` has no `$.ui.close` at run time (TypeError;
+// only ui.mount / ui.press are provided), so the close is raised by the `/dash` toggle. It checks only that the
+// ui.close hook, which ignores the origin, stops the tick. The person's close (Escape) is verified manually.
 
-test('C6.5 pane-close-stops-git-and-disk', async ($: any, on: any) => {
+test('C6.5 ui-close-hook-stops-git-and-disk-via-toggle', async ($: any, on: any) => {
   const { clock, counts } = engine(on, world({ records: [issue(12, 'vert')] }))
   await $.session.start({ cwd: CWD })
   await $.command.run({ command: 'dash' })
