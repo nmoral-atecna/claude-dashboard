@@ -121,8 +121,9 @@ test('C2.9 missing-record-is-ignored', async () => {
 
 // C3 — sorting
 
-function order(issues: Record<number, IssueRecord>, orphans: Set<number> = new Set()): number[] {
-  return composeRows(Object.keys(issues).map(Number), issues, orphans, NOW).map((r) => r.issue)
+// `ids` lets a test feed issueIds in the reverse of the expected order, so the result depends on the comparator.
+function order(issues: Record<number, IssueRecord>, ids: number[] = Object.keys(issues).map(Number)): number[] {
+  return composeRows(ids, issues, new Set(), NOW).map((r) => r.issue)
 }
 
 test('C3.1 blocked-then-least-advanced', async () => {
@@ -136,10 +137,11 @@ test('C3.1 blocked-then-least-advanced', async () => {
 
 test('C3.2 same-step-oldest-first', async () => {
   const issues = {
-    1: record({ issue: 1, step: 'vert', history: [h('vert', hoursAgo(5))] }),
-    2: record({ issue: 2, step: 'vert', history: [h('vert', hoursAgo(1))] }),
+    1: record({ issue: 1, step: 'vert', history: [h('vert', hoursAgo(1))] }),
+    2: record({ issue: 2, step: 'vert', history: [h('vert', hoursAgo(5))] }),
   }
-  expect(order(issues)).toEqual([1, 2])
+  // #2 (5 h) is listed after #1 (1 h) and has the higher number: only the age comparison puts it first.
+  expect(order(issues, [1, 2])).toEqual([2, 1])
 })
 
 test('C3.3 two-blocked-least-advanced-first', async () => {
@@ -155,7 +157,7 @@ test('C3.4 tie-breaks-on-issue-number', async () => {
     9: record({ issue: 9, step: 'vert', history: [h('vert', at('11:00'))] }),
     4: record({ issue: 4, step: 'vert', history: [h('vert', at('11:00'))] }),
   }
-  expect(order(issues)).toEqual([4, 9])
+  expect(order(issues, [9, 4])).toEqual([4, 9])
 })
 
 // C4 — hiding finished issues
@@ -240,6 +242,12 @@ test('C8.2 aligned-truncation-fits-body-columns', async () => {
   expect(lines[1]).toContain('…')
   expect(lines[1]).not.toContain(title)
   expect(lines[1]).not.toContain(note)
-  // Columns stay aligned: the data row's first columns line up with the header's.
-  expect(lines[1].indexOf('…')).toBeGreaterThan('ISSUE  '.length)
+  // Columns stay aligned: each data cell starts exactly where its header label starts.
+  const [header, data] = lines
+  const cells: [string, string][] = [['ISSUE', '#12'], ['TITLE', 'a'], ['STEP', 'vert'], ['NOTE', 'b'], ['AGE', '1h']]
+  for (const [label, cell] of cells) {
+    const start = header.indexOf(label)
+    expect(data.slice(start, start + cell.length)).toBe(cell)
+    if (start > 0) expect(data.slice(start - 2, start)).toBe('  ')
+  }
 })
