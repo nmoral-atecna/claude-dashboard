@@ -39,6 +39,8 @@ declare module 'claude-code' {
       issues: StateFamily<IssueRecord>
       /** Issue numbers of the session project's records, sorted ascending */
       issueIds: number[]
+      /** Issue numbers whose worktree is gone, computed and written by the dashboard tick */
+      dashboardOrphans: number[]
     }
   }
 }
